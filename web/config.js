@@ -16,8 +16,8 @@
 // ============================================================================
 
 window.TUTIS_CONFIG = {
-  SUPABASE_URL: "https://TU-PROYECTO.supabase.co",
-  SUPABASE_ANON_KEY: "TU-LLAVE-ANON-AQUI",
+  SUPABASE_URL: "https://cykvmzendayjvkxzbhha.supabase.co",
+  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN5a3ZtemVuZGF5anZreHpiaGhhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4NjcyNTEsImV4cCI6MjEwNTQ0MzI1MX0.-7XCQS4FvwEVqlL6YeSbeuOh8hPIPgIJZ7nYAUimXDw",
 
   // Desfase horario de las tiendas respecto a UTC. Guatemala, El Salvador y
   // Honduras son todos UTC-6, así que normalmente no hay que tocarlo. Esto es
