@@ -47,6 +47,8 @@ computadoras de las tiendas: se abre en el navegador.
    seguridad y el rastro de auditoría). **Run**.
 7. Nueva consulta, ahora con `sql/06_ventas_por_hora.sql` (la gráfica de horas
    pico). **Run**.
+8. Nueva consulta, ahora con `sql/07_cierre_automatico.sql` (el envío
+   automático del cierre). **Run**.
 
 ### Paso 3 — Crear tu usuario y volverte propietario
 
@@ -168,6 +170,19 @@ Dos gráficas: **en qué se va el dinero** (por categoría) y **cuándo se gasta
 Todo cambio a un gasto queda en el rastro de auditoría, y quién lo registró lo
 pone el servidor, no la pantalla: nadie puede firmar un gasto a nombre de otro.
 
+## El cierre llega solo por correo
+
+Cada noche, a las 22:00, el sistema manda el cierre del día sin que nadie lo
+toque: a cada sucursal el suyo, y a ti el de las dos juntas. Con ventas,
+vasos, cucharas, pesos, ingresos, gastos, utilidad y el cuadro de toppings.
+
+La puesta en marcha (Resend y los secretos) está en `cierre-diario/LEEME.md`.
+Mientras no se configure, el proceso corre, lo anota y no manda nada — no se
+rompe.
+
+El botón "Enviar por correo" del cierre sigue estando, para cuando quieras
+mandarlo a mano a otra persona.
+
 ## Rastro de auditoría
 
 Abajo del tablero hay una tabla que responde **quién cambió qué y cuándo**:
@@ -278,6 +293,8 @@ tutis-web/
     04_logo_y_unidades.sql  Logo de la empresa y unidad de peso
     05_endurecimiento.sql   Validaciones de seguridad y rastro de auditoría
     06_ventas_por_hora.sql  Ventas por hora, para la gráfica de horas pico
+    07_cierre_automatico.sql El cierre de todas las tiendas, para el correo
+  cierre-diario/      Envío automático del cierre (tiene su propio LEEME.md)
     pruebas/          Pruebas de aislamiento en un PostgreSQL local
   web/                <- esta carpeta es la que se publica
     index.html        La aplicación
@@ -302,12 +319,6 @@ internet**: los archivos quedan guardados en el dispositivo.
 
 ## Lo que quedó pendiente
 
-- **Envío automático del cierre por correo.** Hoy el botón "Enviar por correo"
-  abre tu programa de correo con el reporte ya escrito y solo confirmas. Para
-  que salga solo todos los días a una hora fija, sin que nadie lo toque, hay que
-  agregar una función programada en Supabase (Edge Function + cron) conectada a
-  un servicio de correo. Es el siguiente paso natural y se puede construir sobre
-  lo que ya está.
 - **Afinar el lector de la báscula** al modelo que compren.
 - **Conectar el proveedor de facturación** cuando esté el registro fiscal.
 - **Respaldos**: el plan gratuito tiene retención limitada. Si el negocio crece,

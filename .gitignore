@@ -10,3 +10,7 @@ package-lock.json
 
 # Ajustes locales de Claude Code
 .claude/settings.local.json
+
+# Secretos locales de desarrollo (nunca al repositorio)
+.dev.vars
+**/.dev.vars

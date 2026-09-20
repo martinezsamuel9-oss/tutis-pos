@@ -1,0 +1,53 @@
+{
+  // ==========================================================================
+  //  TUTI'S — Envío automático del cierre del día
+  //
+  //  Worker APARTE del sitio. Deliberadamente separado: si algo falla aquí,
+  //  la caja no se entera. El punto de venta no puede depender de que el
+  //  correo funcione.
+  //
+  //  No tiene dirección web ni ruta: solo se despierta con el reloj.
+  //
+  //  Publicar:   cd cierre-diario && npx wrangler deploy
+  //  Ver qué hizo anoche:  npx wrangler tail tutis-cierre-diario
+  // ==========================================================================
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tutis-cierre-diario",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-20",
+
+  // Sin dirección pública. Este Worker guarda la llave del servidor, la que se
+  // salta todas las reglas de seguridad de la base; no tiene por qué ser
+  // alcanzable desde internet cuando lo único que necesita es el reloj.
+  // Hoy su puerta /enviar ya devuelve 404 mientras no exista el secreto
+  // TOKEN_MANUAL, pero eso depende de que el código no tenga un error algún
+  // día. Cerrar la puerta de una vez cuesta una línea.
+  //
+  // Para poder pedir el cierre a mano: poner esto en true, publicar, crear el
+  // secreto TOKEN_MANUAL, y volverlo a false cuando ya no haga falta.
+  "workers_dev": false,
+
+  "triggers": {
+    // Los cron de Cloudflare van SIEMPRE en UTC. Honduras es UTC-6, así que
+    // las 22:00 de la noche en la tienda son las 04:00 UTC del día siguiente.
+    // El Worker sabe restar el desfase para reportar el día correcto.
+    // Si cambian el horario de cierre, se cambia esta línea y se vuelve a
+    // publicar.
+    "crons": ["0 4 * * *"]
+  },
+
+  "vars": {
+    // Desfase de las tiendas respecto a UTC. Guatemala, El Salvador y
+    // Honduras son -6.
+    "UTC_OFFSET_HOURS": "-6",
+    // De quién sale el correo. El dominio tiene que estar verificado en
+    // Resend o el envío se rechaza.
+    "REMITENTE": "Tuti's <cierre@slabblu.com>",
+    // Quién recibe el consolidado de TODAS las tiendas. Cada sucursal además
+    // recibe el suyo en el correo que tenga configurado en la aplicación.
+    // Se pueden poner varios separados por coma.
+    "CORREO_PROPIETARIO": ""
+  },
+
+  "observability": { "enabled": true }
+}

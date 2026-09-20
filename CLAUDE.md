@@ -59,6 +59,8 @@ sql/03_dashboard.sql tabla de gastos + dashboard_summary()
 sql/04_logo_y_unidades.sql  logo por sucursal + unidad de peso preferida
 sql/05_endurecimiento.sql   validación en process_sale + rastro de auditoría
 sql/06_ventas_por_hora.sql  dashboard_summary devuelve además ventas por hora
+sql/07_cierre_automatico.sql daily_closing_all() + bitácora de correos
+cierre-diario/      Worker programado que manda el cierre (ver su LEEME.md)
 sql/pruebas/        prueba_aislamiento.sql (13) + prueba_seguridad.sql (48 ataques)
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
 web/app.js          toda la lógica (17 secciones numeradas)
@@ -223,6 +225,30 @@ Lo que salió de ahí y NO se debe deshacer:
 6. **El SDK de Supabase se mantiene al día** (`web/vendor/`). La versión 2.45.4
    con la que arrancó el proyecto tenía un aviso de seguridad en `auth-js`.
 
+## 3.3 El cierre automático por correo
+
+Vive en `cierre-diario/`, un Worker de Cloudflare con disparador de reloj.
+**Su LEEME.md tiene la puesta en marcha completa.** Lo que no hay que deshacer:
+
+1. **Es un Worker APARTE del sitio.** Si el correo falla, la caja no se
+   entera. El punto de venta no puede depender del envío.
+2. **Las cuentas las hace la base** (`daily_closing_all`), no el Worker. Con
+   el cálculo en dos lugares, un día dejarían de coincidir.
+3. **`daily_closing_core()` no pregunta permisos y por eso NADIE puede
+   llamarla**, ni `authenticated` ni `anon`: se llega por `daily_closing()`,
+   que sí pregunta. `daily_closing_all()` es solo para `service_role`. El
+   permiso ahí no es "quién eres" sino "tienes la llave del servidor".
+4. **La llave `service_role` vive ÚNICAMENTE como secreto de Cloudflare.**
+   Es el único lugar del sistema donde se usa.
+5. **El Worker no tiene dirección pública** (`workers_dev: false`). Guarda esa
+   llave; no tiene por qué ser alcanzable desde internet.
+6. **El cron va en UTC**; las tiendas están en UTC-6. `0 4 * * *` son las
+   22:00 de la tienda. El Worker resta el desfase para saber qué día reportar.
+7. **El correo declara `<meta charset="utf-8">`.** Sin eso los acentos llegan
+   rotos ("GalerÃ­as"), y este reporte está lleno de acentos.
+8. **Un correo ya enviado no se repite**: índice único por día, sucursal y
+   destinatario en `closing_email_log`.
+
 ## 4. Restricciones permanentes (pedidas explícitamente)
 
 - **NUNCA incluir el sitio web `https://tutis.innova504.com/` en la factura o
@@ -315,15 +341,7 @@ y el tema. Se levantan con `node` + `playwright` apuntando a
 
 ## 7. Pendientes, en orden de valor
 
-1. **Envío automático del cierre por correo a una hora fija.** Hoy el botón
-   "Enviar por correo" abre el cliente de correo con el reporte ya escrito
-   (`mailto:`), y el usuario confirma. Para que salga solo, sin intervención:
-   Supabase Edge Function + pg_cron, llamando a `daily_closing()` por cada
-   sucursal y enviando con un servicio de correo (Resend o similar). El dueño
-   quiere **un reporte por tienda**, no solo el consolidado. El contenido
-   requerido: cantidad de vasos, cantidad de cucharas, peso vendido de helado,
-   peso vendido de toppings, y el cuadro de cada topping vendido con su %.
-2. **Afinar el lector de báscula** al modelo que compren. Todavía no la tienen.
+1. **Afinar el lector de báscula** al modelo que compren. Todavía no la tienen.
    Se les recomendó Torrey/CAS/OHAUS con salida serial continua ("PC mode").
    El lector actual (`web/app.js`, sección 14, Web Serial) es tolerante: toma el
    primer número de cada línea. Requiere Chrome/Edge + HTTPS; no funciona en
