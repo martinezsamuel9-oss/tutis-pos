@@ -22,6 +22,11 @@
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), interest-cohort=()
   Cross-Origin-Opener-Policy: same-origin
   X-Robots-Tag: noindex, nofollow
+  # Una vez que el navegador visita el sitio por HTTPS, se niega a volver por
+  # HTTP durante un año — aunque alguien le meta un enlace http:// o intente
+  # degradar la conexión en el wifi del mall. OJO: esto protege a partir de la
+  # SEGUNDA visita; la primera la cubre "Always Use HTTPS" en Cloudflare.
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
 
 # La configuracion y el service worker nunca se guardan en cache del navegador:
 # si cambian las credenciales o se publica una version nueva, tiene que llegar.

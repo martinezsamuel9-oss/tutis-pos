@@ -57,7 +57,8 @@ sql/01_schema.sql   tablas, enums, RLS, process_sale(), daily_closing()
 sql/02_seed.sql     2 sucursales + catálogo de arranque
 sql/03_dashboard.sql tabla de gastos + dashboard_summary()
 sql/04_logo_y_unidades.sql  logo por sucursal + unidad de peso preferida
-sql/pruebas/        pruebas de aislamiento (ver sección 6) — 13 pruebas
+sql/05_endurecimiento.sql   validación en process_sale + rastro de auditoría
+sql/pruebas/        prueba_aislamiento.sql (13) + prueba_seguridad.sql (48 ataques)
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
 web/app.js          toda la lógica (17 secciones numeradas)
 web/styles.css      estilos, modo día/noche
@@ -162,6 +163,47 @@ correo apagada. El riesgo está contenido por diseño: quien se registre solo
 nace sin sucursal, y sin sucursal la aplicación no lo deja entrar y RLS no le
 muestra nada.
 
+## 3.2 Seguridad y auditoría
+
+Se auditó el sistema atacándolo desde la posición realista: alguien con cuenta
+legítima (cajera o gerente) llamando la API directo desde la consola. Está en
+`sql/pruebas/prueba_seguridad.sql` y **hay que volver a correrla si se toca el
+esquema o `process_sale`**.
+
+Lo que salió de ahí y NO se debe deshacer:
+
+1. **`process_sale` rechaza pesos, costos y precios negativos.** Era el único
+   ataque que pasaba: `weight_g = -500` hacía `stock - (-500)` y SUMABA
+   inventario. Una cajera podía tapar un faltante inventando una venta
+   negativa. También se rechazan pesos sobre 100 000 g.
+
+2. **El encabezado de la venta se calcula de sus líneas, no viene del
+   navegador.** Antes se podía mandar `total_price: 1` con líneas por 500.
+   Reporte y detalle ya no pueden contradecirse.
+
+   Lo que **sí** sigue viniendo del navegador es el precio de cada línea, y es
+   deliberado: una venta cobrada sin internet tiene que conservar el precio
+   que el cliente pagó, no el vigente al sincronizar. El control de ese riesgo
+   es el rastro de auditoría más el reporte de margen, no recalcular.
+
+3. **`expenses.created_by` lo pone un disparador con `auth.uid()`.** Antes una
+   gerente podía firmar un gasto con el id de otra persona.
+
+4. **El rastro de auditoría (`audit_log`) es de solo lectura desde la API.** No
+   hay política de insert, update ni delete: solo escriben los disparadores,
+   que son `SECURITY DEFINER`. Ni el propietario puede editarlo — eso es lo
+   que le da valor. Se audita lo que mueve dinero o permisos (precios, costos,
+   existencias, roles, gastos y el BORRADO de ventas), pero **no el alta de
+   cada venta**: la venta ya es su propio registro y duplicarla llenaría la
+   base del plan gratuito sin aportar nada.
+
+5. **El logo se valida contra `data:image/...;base64,` antes de pintarse.** Un
+   `data:image/svg+xml` puede llevar scripts adentro; por eso no basta con
+   escapar el atributo.
+
+6. **El SDK de Supabase se mantiene al día** (`web/vendor/`). La versión 2.45.4
+   con la que arrancó el proyecto tenía un aviso de seguridad en `auth-js`.
+
 ## 4. Restricciones permanentes (pedidas explícitamente)
 
 - **NUNCA incluir el sitio web `https://tutis.innova504.com/` en la factura o
@@ -223,7 +265,9 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/01_schema.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/02_seed.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/03_dashboard.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/04_logo_y_unidades.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/05_endurecimiento.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_aislamiento.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_seguridad.sql
 ```
 
 `00_simulacion_supabase.sql` recrea lo que Supabase ya trae (schema `auth`,

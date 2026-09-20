@@ -43,6 +43,8 @@ computadoras de las tiendas: se abre en el navegador.
    del tablero). **Run**.
 5. Nueva consulta, ahora con `sql/04_logo_y_unidades.sql` (el logo y la unidad
    de peso). **Run**.
+6. Nueva consulta, ahora con `sql/05_endurecimiento.sql` (validaciones de
+   seguridad y el rastro de auditoría). **Run**.
 
 ### Paso 3 — Crear tu usuario y volverte propietario
 
@@ -150,6 +152,16 @@ Las dos se configuran por tienda, en **Configuración**:
   pantalla conservan la suya — reinterpretar un "30" de gramos a onzas
   multiplicaría el cobro por 28.
 
+## Rastro de auditoría
+
+Abajo del tablero hay una tabla que responde **quién cambió qué y cuándo**:
+cambios de precio, de costo, de existencias, de rol, de gastos, y el borrado
+de ventas. Los borrados salen marcados en rojo.
+
+Nadie puede editarlo ni borrarlo — ni tú. Esa es la idea: si un día no cuadra
+la caja, ese registro es el que dice qué pasó, y solo sirve si nadie lo puede
+tocar. Cada gerente ve el de su tienda; el propietario, el de las dos.
+
 ## Cómo se usa cada rol
 
 **Cajera.** Solo ve la pestaña Venta, y solo de su tienda. Pesa el vaso, el
@@ -248,6 +260,7 @@ tutis-web/
     02_seed.sql       Las 2 sucursales y el catálogo de arranque
     03_dashboard.sql  Gastos y los cálculos del tablero
     04_logo_y_unidades.sql  Logo de la empresa y unidad de peso
+    05_endurecimiento.sql   Validaciones de seguridad y rastro de auditoría
     pruebas/          Pruebas de aislamiento en un PostgreSQL local
   web/                <- esta carpeta es la que se publica
     index.html        La aplicación

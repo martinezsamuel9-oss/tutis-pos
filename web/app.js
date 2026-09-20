@@ -809,9 +809,8 @@ function showReceipt(payload, result, folio, offline) {
     .map((l) => `${esc(l.name)}${l.weight_g ? "  " + fmtWeightShort(l.weight_g) : ""}   ${money(l.price_contribution)}`)
     .join("\n");
 
-  const logo = loc.logo_data_url
-    ? `<div class="doc-logo"><img src="${esc(loc.logo_data_url)}" alt=""></div>`
-    : "";
+  const logoSrc = logoSeguro(loc.logo_data_url);
+  const logo = logoSrc ? `<div class="doc-logo"><img src="${esc(logoSrc)}" alt=""></div>` : "";
   $("receipt-body").innerHTML = logo + `<div class="ticket" style="white-space:pre-wrap;">
 ${esc(loc.legal_name || loc.name)}
 ${esc(loc.name)}
@@ -1245,15 +1244,24 @@ $("cfg-price-gram").addEventListener("input", () => {
 // consolidado no hay "una" tienda, así que se usa el de la que tiene abierta.
 function logoHtml() {
   const loc = activeLocation();
-  return loc && loc.logo_data_url
-    ? `<div class="doc-logo"><img src="${esc(loc.logo_data_url)}" alt=""></div>`
-    : "";
+  const src = loc && logoSeguro(loc.logo_data_url);
+  return src ? `<div class="doc-logo"><img src="${esc(src)}" alt=""></div>` : "";
+}
+
+// El logo llega de la base y termina en el src de una imagen. esc() ya impide
+// que se salga del atributo, pero además exigimos que sea de verdad una
+// imagen incrustada: así ni un valor escrito directo contra la API puede
+// convertir ese src en otra cosa.
+function logoSeguro(v) {
+  return (typeof v === "string" && /^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v))
+    ? v : null;
 }
 
 function pintarLogo(dataUrl) {
   const box = $("cfg-logo-preview");
-  if (dataUrl) {
-    box.innerHTML = `<img src="${esc(dataUrl)}" alt="Logo de la tienda">`;
+  const src = logoSeguro(dataUrl);
+  if (src) {
+    box.innerHTML = `<img src="${esc(src)}" alt="Logo de la tienda">`;
     $("btn-remove-logo").hidden = false;
   } else {
     box.innerHTML = '<span class="hint">Sin logo</span>';
@@ -1617,7 +1625,7 @@ if (!scaleSupported()) {
    propósito: la política de seguridad del sitio no permite cargar código de
    otro dominio, y para barras y una línea de promedio no hace falta.
    =========================================================================== */
-const DASH = { results: [], expenses: [], from: null, to: null, loaded: false };
+const DASH = { results: [], expenses: [], audit: [], from: null, to: null, loaded: false };
 
 const EXPENSE_LABELS = {
   renta: "Renta", planilla: "Planilla", insumos: "Insumos",
@@ -1740,6 +1748,16 @@ async function loadDashboard() {
   const { data: gastos } = await q;
   DASH.expenses = gastos || [];
 
+  // El rastro de auditoría: la base ya decide qué puede ver cada quien, así
+  // que aquí solo se pide y se muestra lo que devuelva.
+  let qa = sb.from("audit_log").select("*")
+             .gte("at", DASH.from + "T00:00:00")
+             .lte("at", DASH.to + "T23:59:59.999")
+             .order("at", { ascending: false }).limit(150);
+  if (ids.length === 1) qa = qa.eq("location_id", ids[0]);
+  const { data: eventos } = await qa;
+  DASH.audit = eventos || [];
+
   DASH.loaded = true;
   renderDashboard();
 }
@@ -1834,6 +1852,7 @@ function renderDashboard() {
   renderDashStores();
   renderDashProjection(serie, t);
   renderDashExpenses();
+  renderDashAudit();
   renderDashToppings();
 }
 
@@ -2053,6 +2072,79 @@ $("btn-add-expense").addEventListener("click", async () => {
   await loadDashboard();
   setTimeout(() => (msg.textContent = ""), 2500);
 });
+
+/* --- Rastro de auditoría ---------------------------------------------------
+   Solo se muestra lo que la base dejó pasar. La cajera no llega aquí (no ve
+   la pestaña) y aunque llegara, sus consultas volverían vacías. */
+const AUDIT_TABLAS = {
+  locations: "Sucursal", profiles: "Personal", flavors: "Sabor",
+  toppings: "Topping", supplies: "Insumo", expenses: "Gasto", sales: "Venta",
+};
+const AUDIT_ACCIONES = { INSERT: "Creó", UPDATE: "Cambió", DELETE: "Borró" };
+// Campos que valen la pena en un resumen. El resto (fechas internas, ids)
+// solo haría ruido.
+const AUDIT_CAMPOS = {
+  price_per_gram: "precio/g", margin_target_pct: "margen meta", cost_per_gram: "costo/g",
+  cost_per_unit: "costo c/u", stock_grams: "stock", stock_qty: "stock",
+  min_stock_grams: "stock mínimo", min_stock_qty: "stock mínimo",
+  tier: "tier", surcharge_per_gram: "recargo/g", tare_weight_g: "tara",
+  role: "rol", location_id: "sucursal", active: "activo", amount: "monto",
+  name: "nombre", currency_code: "moneda", country_code: "país",
+  default_weight_unit: "unidad", logo_data_url: "logo", category: "categoría",
+  total_price: "total", description: "descripción", report_email: "correo",
+  include_cup_weight_in_price: "cobra el vaso", legal_name: "razón social",
+  tax_id_value: "identificación fiscal", address: "dirección", spent_on: "fecha",
+};
+
+// Resume un evento en una frase legible: "costo/g: 0.06 → 0.02".
+function auditResumen(ev) {
+  const antes = ev.before || {}, despues = ev.after || {};
+  if (ev.action === "DELETE") {
+    // Una venta se identifica por su folio, no por un nombre entre comillas.
+    const etiqueta = antes.folio != null ? `venta #${antes.folio}`
+                   : (antes.name || antes.description || antes.full_name);
+    const monto = antes.total_price != null ? ` por ${dmoney(antes.total_price)}`
+                : antes.amount != null ? ` por ${dmoney(antes.amount)}` : "";
+    return (etiqueta ? (antes.folio != null ? etiqueta : `"${etiqueta}"`) : "registro") + monto;
+  }
+  if (ev.action === "INSERT") {
+    const etiqueta = despues.name || despues.description || despues.full_name || "";
+    const monto = despues.amount != null ? ` por ${dmoney(despues.amount)}` : "";
+    return (etiqueta ? `"${etiqueta}"` : "registro nuevo") + monto;
+  }
+  const partes = [];
+  Object.keys(AUDIT_CAMPOS).forEach((k) => {
+    if (!(k in despues)) return;
+    const a = antes[k], b = despues[k];
+    if (String(a) === String(b)) return;
+    partes.push(`${AUDIT_CAMPOS[k]}: ${a === null || a === undefined || a === "" ? "—" : a} → ${b === null || b === undefined || b === "" ? "—" : b}`);
+  });
+  return partes.length ? partes.join(" · ") : "cambio menor";
+}
+
+function renderDashAudit() {
+  const body = document.querySelector("#table-audit tbody");
+  const nota = $("audit-note");
+  const eventos = DASH.audit || [];
+  body.innerHTML = eventos.length ? "" :
+    '<tr><td colspan="5" class="hint">Sin cambios registrados en este periodo.</td></tr>';
+  eventos.forEach((ev) => {
+    const tr = document.createElement("tr");
+    // Un borrado siempre merece una segunda mirada.
+    if (ev.action === "DELETE") tr.classList.add("low-stock");
+    const nombre = ev.actor_name || "(usuario desconocido)";
+    tr.innerHTML = `<td>${esc(new Date(ev.at).toLocaleString())}</td>
+      <td>${esc(nombre)}${ev.actor_role ? ` <span class="kpi-sub">${esc(ev.actor_role)}</span>` : ""}</td>
+      <td>${esc(AUDIT_TABLAS[ev.table_name] || ev.table_name)}</td>
+      <td>${esc(AUDIT_ACCIONES[ev.action] || ev.action)}</td>
+      <td>${esc(auditResumen(ev))}</td>`;
+    body.appendChild(tr);
+  });
+  const borrados = eventos.filter((e) => e.action === "DELETE").length;
+  nota.textContent = eventos.length
+    ? `${eventos.length} evento(s) en el periodo` + (borrados ? `, ${borrados} de ellos borrados (marcados en rojo).` : ".")
+    : "";
+}
 
 /* --- Toppings del periodo -------------------------------------------------- */
 function renderDashToppings() {

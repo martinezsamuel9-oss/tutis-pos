@@ -159,6 +159,20 @@
         <p class="hint" id="ne-msg"></p>
       </div>
 
+      <div class="card" id="dash-audit-card">
+        <h2>Rastro de auditoría</h2>
+        <div class="sub">
+          Quién cambió qué y cuándo, en el periodo mostrado. Incluye cambios de precio, de costo,
+          de existencias, de rol, de gastos y el borrado de ventas. Nadie puede editar ni borrar
+          este registro, ni siquiera el propietario.
+        </div>
+        <div class="table-wrap"><table class="data" id="table-audit">
+          <thead><tr><th>Cuándo</th><th>Quién</th><th>Qué</th><th>Acción</th><th>Cambio</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <p class="hint" id="audit-note"></p>
+      </div>
+
       <div class="card">
         <h2>Toppings del periodo</h2>
         <div class="sub">Cuánto se vendió de cada uno y qué margen dejó. De menor a mayor margen.</div>
@@ -457,7 +471,7 @@
 </div>
 
 <script src="config.js"></script>
-<!-- El SDK de Supabase va servido desde aquí mismo, no desde un CDN externo.
+<!-- SDK de Supabase 2.116.0, servido desde aquí mismo y no desde un CDN.
      Dos razones: la tienda puede abrir la aplicacion sin internet (el service
      worker no puede guardar lo que sirve otro dominio), y nadie de fuera puede
      cambiar el codigo que corre en la caja. -->
