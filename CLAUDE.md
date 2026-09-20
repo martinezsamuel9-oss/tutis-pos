@@ -62,6 +62,7 @@ sql/06_ventas_por_hora.sql  dashboard_summary devuelve además ventas por hora
 sql/07_cierre_automatico.sql daily_closing_all() + bitácora de correos
 cierre-diario/      Worker programado que manda el cierre (ver su LEEME.md)
 sql/pruebas/        prueba_aislamiento.sql (13) + prueba_seguridad.sql (48 ataques)
+                    + datos_de_demostracion.sql (14 días de ventas, borrables)
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
 web/app.js          toda la lógica (17 secciones numeradas)
 web/styles.css      estilos, modo día/noche
