@@ -317,3 +317,59 @@ table.data tr.low-stock td { background: var(--danger-bg); }
 @media print {
   .doc-logo img { max-height: 48px; }
 }
+
+/* ===========================================================================
+   PALETA DE GRÁFICAS
+   ---------------------------------------------------------------------------
+   No son los colores de marca tal cual: los de marca no pasaban las pruebas
+   de daltonismo ni el piso de saturación (el verde #2F7A62 se leía gris, y
+   el ámbar contra el rojo eran casi el mismo color para cualquiera). Estos
+   se corrieron por el validador y pasan en modo día y en modo noche.
+
+   El significado es constante en toda la app:
+     verde = dinero que se queda   rojo = dinero que sale   azul = volumen
+   El par rojo/verde queda en el límite para daltonismo rojo-verde, así que
+   toda gráfica que los use lleva SIEMPRE etiqueta de texto además del color.
+   =========================================================================== */
+:root {
+  --viz-ok:      #0F8A5F;
+  --viz-bad:     #B14328;
+  --viz-neutral: #2A6FB8;
+  --viz-grid:    rgba(18,48,58,0.14);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --viz-ok:      #35A87C;
+    --viz-bad:     #D06A4E;
+    --viz-neutral: #5B93DC;
+    --viz-grid:    rgba(233,242,240,0.16);
+  }
+}
+:root[data-theme="dark"] {
+  --viz-ok:      #35A87C;
+  --viz-bad:     #D06A4E;
+  --viz-neutral: #5B93DC;
+  --viz-grid:    rgba(233,242,240,0.16);
+}
+
+.chart-box svg { width: 100%; height: auto; display: block; overflow: visible; }
+.chart-box { margin-top: 4px; }
+.fill-ok      { fill: var(--viz-ok); }
+.fill-bad     { fill: var(--viz-bad); }
+.fill-neutral { fill: var(--viz-neutral); }
+.stroke-ok    { stroke: var(--viz-ok); fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+
+/* Las barras se aclaran al pasar el mouse; el título nativo da el detalle. */
+.chart-box g[data-mark] { transition: opacity .12s ease; cursor: default; }
+.chart-box:hover g[data-mark] { opacity: .45; }
+.chart-box g[data-mark]:hover { opacity: 1; }
+
+.chart-axis  { stroke: var(--viz-grid); stroke-width: 1; }
+.chart-label { fill: var(--ink-soft); font-family: var(--font); font-size: 10px; }
+.chart-value { fill: var(--ink); font-family: var(--font); font-size: 10px; font-weight: 700; }
+.chart-empty { color: var(--ink-soft); font-size: .9rem; padding: 20px 0; text-align: center; }
+
+.chart-grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; }
+.chart-grid-2 > div { min-width: 0; }
+.chart-title { font-weight: 700; font-size: .92rem; margin-bottom: 2px; }
+.chart-sub   { color: var(--ink-soft); font-size: .8rem; margin-bottom: 8px; }

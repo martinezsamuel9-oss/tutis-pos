@@ -56,6 +56,7 @@
         <button class="tab-btn active" data-tab="venta">Venta</button>
         <button class="tab-btn" data-tab="inventario" data-min-role="gerente">Inventario</button>
         <button class="tab-btn" data-tab="toppings" data-min-role="gerente">Toppings</button>
+        <button class="tab-btn" data-tab="gastos" data-min-role="gerente">Gastos</button>
         <button class="tab-btn" data-tab="reportes" data-min-role="gerente">Reportes</button>
         <button class="tab-btn" data-tab="config" data-min-role="gerente">Configuración</button>
         <button class="tab-btn" data-tab="admin" data-min-role="propietario">Sucursales y usuarios</button>
@@ -109,10 +110,46 @@
       </div>
 
       <div class="card">
-        <h2>Ingresos, gastos y utilidad</h2>
-        <div class="sub">Cada barra es un día del periodo. La línea marca el promedio diario de ingresos.</div>
-        <div id="dash-chart"></div>
+        <h2>A dónde va cada lempira</h2>
+        <div class="sub">De todo lo que entró en el periodo, cuánto se fue en producto, cuánto en operar la tienda, y cuánto quedó.</div>
+        <div class="chart-box" id="chart-composicion"></div>
+      </div>
+
+      <div class="card">
+        <h2>Ingresos y gastos</h2>
+        <div class="sub">Cada barra es un día del periodo. La línea punteada marca el promedio diario de ingresos.</div>
+        <div class="chart-box" id="dash-chart"></div>
         <div class="chart-legend" id="dash-chart-legend"></div>
+      </div>
+
+      <div class="card">
+        <div class="chart-grid-2">
+          <div>
+            <div class="chart-title">Ventas por día de la semana</div>
+            <div class="chart-sub">Para decidir turnos y cuánto preparar.</div>
+            <div class="chart-box" id="chart-semana"></div>
+          </div>
+          <div>
+            <div class="chart-title">Ventas por hora</div>
+            <div class="chart-sub">A qué hora se llena el local.</div>
+            <div class="chart-box" id="chart-hora"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="chart-grid-2">
+          <div>
+            <div class="chart-title">Toppings más vendidos</div>
+            <div class="chart-sub">Por peso despachado en el periodo.</div>
+            <div class="chart-box" id="chart-toppings"></div>
+          </div>
+          <div>
+            <div class="chart-title">Margen del día</div>
+            <div class="chart-sub">Qué porcentaje de cada venta quedó como margen. Los días sin ventas cortan la línea.</div>
+            <div class="chart-box" id="chart-margen"></div>
+          </div>
+        </div>
       </div>
 
       <div class="card" id="dash-bystore-card">
@@ -132,31 +169,9 @@
       </div>
 
       <div class="card">
-        <h2>Gastos</h2>
-        <div class="sub">Lo que cuesta operar la tienda, aparte del costo del producto. Es lo que convierte el margen en utilidad real.</div>
-        <div class="kpi-grid" id="dash-expense-cats"></div>
-        <div class="table-wrap"><table class="data" id="table-expenses">
-          <thead><tr><th>Fecha</th><th>Sucursal</th><th>Categoría</th><th>Descripción</th><th>Monto</th><th></th></tr></thead>
-          <tbody></tbody>
-        </table></div>
-
-        <h2 style="margin-top:18px;">Registrar un gasto</h2>
-        <div class="field"><label>Fecha</label><input type="date" id="ne-date"></div>
-        <div class="field"><label>Categoría</label><select id="ne-cat">
-          <option value="renta">Renta</option>
-          <option value="planilla">Planilla</option>
-          <option value="insumos">Insumos</option>
-          <option value="servicios">Servicios (luz, agua, internet)</option>
-          <option value="mantenimiento">Mantenimiento</option>
-          <option value="mercadeo">Mercadeo</option>
-          <option value="impuestos">Impuestos</option>
-          <option value="otros">Otros</option>
-        </select></div>
-        <div class="field stack"><label>Descripción</label><input id="ne-desc" placeholder="Ej. Renta de septiembre"></div>
-        <div class="field"><label>Monto</label><input id="ne-amount" type="number" step="0.01" min="0"></div>
-        <p class="hint" id="ne-target"></p>
-        <button class="btn primary" id="btn-add-expense">Agregar gasto</button>
-        <p class="hint" id="ne-msg"></p>
+        <h2>Gastos del periodo</h2>
+        <div class="sub">Resumen. Para registrarlos, editarlos y verlos a detalle está la pestaña <strong>Gastos</strong>.</div>
+        <div class="chart-box" id="chart-gastos-cat"></div>
       </div>
 
       <div class="card" id="dash-audit-card">
@@ -307,6 +322,88 @@
         <div class="field"><label>Costo por gramo</label><input id="nt-cost" type="number" step="0.001"></div>
         <div class="field"><label>Stock inicial (g)</label><input id="nt-stock" type="number"></div>
         <button class="btn primary" id="btn-add-topping">Agregar topping</button>
+      </div>
+    </section>
+
+
+    <!-- ===================== GASTOS ===================== -->
+    <section id="tab-gastos" class="tab-panel">
+
+      <div class="card no-print">
+        <h2>Qué estás viendo</h2>
+        <div class="filter-bar">
+          <div class="field stack">
+            <label for="gas-location">Tienda</label>
+            <select id="gas-location"></select>
+          </div>
+          <div class="field stack">
+            <label for="gas-range">Periodo</label>
+            <select id="gas-range">
+              <option value="mes" selected>Este mes</option>
+              <option value="mes_pasado">Mes pasado</option>
+              <option value="semana">Esta semana</option>
+              <option value="30d">Últimos 30 días</option>
+              <option value="90d">Últimos 90 días</option>
+              <option value="anio">Este año</option>
+              <option value="personalizado">Personalizado…</option>
+            </select>
+          </div>
+          <div class="field stack" id="gas-custom-from" hidden>
+            <label for="gas-from">Desde</label><input type="date" id="gas-from">
+          </div>
+          <div class="field stack" id="gas-custom-to" hidden>
+            <label for="gas-to">Hasta</label><input type="date" id="gas-to">
+          </div>
+          <div class="field stack">
+            <label for="gas-cat-filter">Categoría</label>
+            <select id="gas-cat-filter"><option value="">Todas</option></select>
+          </div>
+          <button class="btn ghost" id="btn-gas-refresh" type="button">Actualizar</button>
+        </div>
+        <p class="hint" id="gas-range-label"></p>
+      </div>
+
+      <div class="card">
+        <div class="closing-print-head" id="gas-print-head"></div>
+        <h2>Resumen</h2>
+        <div id="gas-warnings"></div>
+        <div class="kpi-grid" id="gas-kpis"></div>
+      </div>
+
+      <div class="card">
+        <div class="chart-grid-2">
+          <div>
+            <div class="chart-title">En qué se va el dinero</div>
+            <div class="chart-sub">Por categoría, de mayor a menor.</div>
+            <div class="chart-box" id="gas-chart-cat"></div>
+          </div>
+          <div>
+            <div class="chart-title">Cuándo se gasta</div>
+            <div class="chart-sub">Por día del periodo. La renta y la planilla se ven como picos.</div>
+            <div class="chart-box" id="gas-chart-tiempo"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Registrar un gasto</h2>
+        <div class="field"><label>Fecha</label><input type="date" id="ng-date"></div>
+        <div class="field"><label>Categoría</label><select id="ng-cat"></select></div>
+        <div class="field stack"><label>Descripción</label><input id="ng-desc" placeholder="Ej. Renta de septiembre"></div>
+        <div class="field"><label>Monto</label><input id="ng-amount" type="number" step="0.01" min="0"></div>
+        <p class="hint" id="ng-target"></p>
+        <button class="btn primary" id="btn-ng-add">Agregar gasto</button>
+        <p class="hint" id="ng-msg"></p>
+      </div>
+
+      <div class="card">
+        <h2>Detalle</h2>
+        <div class="sub">Puedes corregir el monto, la descripción o la categoría de un gasto y guardarlo con el disquete. Todo cambio queda en el rastro de auditoría.</div>
+        <div class="table-wrap"><table class="data" id="table-gastos">
+          <thead><tr><th>Fecha</th><th>Sucursal</th><th>Categoría</th><th>Descripción</th><th>Monto</th><th>Registró</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <p class="hint" id="gas-total-hint"></p>
       </div>
     </section>
 

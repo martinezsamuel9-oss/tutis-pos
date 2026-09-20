@@ -58,6 +58,7 @@ sql/02_seed.sql     2 sucursales + catálogo de arranque
 sql/03_dashboard.sql tabla de gastos + dashboard_summary()
 sql/04_logo_y_unidades.sql  logo por sucursal + unidad de peso preferida
 sql/05_endurecimiento.sql   validación en process_sale + rastro de auditoría
+sql/06_ventas_por_hora.sql  dashboard_summary devuelve además ventas por hora
 sql/pruebas/        prueba_aislamiento.sql (13) + prueba_seguridad.sql (48 ataques)
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
 web/app.js          toda la lógica (17 secciones numeradas)
@@ -146,13 +147,31 @@ gerente y propietario (la cajera sigue aterrizando en Venta y no ve la pestaña)
 - **Gastos** (`expenses`) es lo que faltaba para tener utilidad de verdad:
   `utilidad = margen del producto − gastos de operar`. La cajera no los ve ni
   los registra.
-- **Las gráficas son SVG escrito a mano.** No hay librería de gráficas y no la
-  puede haber: la CSP es `script-src 'self'`. Si el periodo pasa de 45 días,
-  las barras se agrupan por semana.
+- **Las gráficas son SVG escrito a mano** (`vizBarras`, `vizBarrasH`,
+  `vizBarrasDobles`, `vizApilada`, `vizLinea`). No hay librería y no la puede
+  haber: la CSP es `script-src 'self'`. Si el periodo pasa de 45 días, las
+  barras se agrupan por semana.
+- **La paleta de gráficas NO son los colores de marca.** Los de marca no
+  pasaban el validador: el verde `#2F7A62` caía bajo el piso de saturación (se
+  leía gris) y el ámbar contra el rojo quedaban a ΔE 13.9 para visión normal.
+  Las que están (`--viz-ok/-bad/-neutral` en `styles.css`) se validaron en
+  ambos modos. El significado es fijo: **verde = dinero que se queda, rojo =
+  dinero que sale, azul = volumen**. El par rojo/verde queda en el límite para
+  daltonismo rojo-verde, así que donde aparecen juntos **siempre** va etiqueta
+  de texto además del color — no es decoración, es lo que hace legible la
+  gráfica.
+- **El margen diario se grafica como `null` en los días sin ventas**, no como
+  0 %. Dibujar 0 % diría que el margen se desplomó, cuando lo que pasó es que
+  la tienda no vendió.
 - **La proyección es una regla de tres, y lo dice en pantalla**: promedio
   diario × días del mes. Con menos de 14 días con ventas muestra una
   advertencia explícita. No se debe cambiar por un modelo que parezca más
   seguro de lo que es.
+
+**Los gastos viven en su propia pestaña**, no en el tablero: el tablero solo
+muestra el resumen y la gráfica. Tener el formulario en dos lugares invitaba a
+editar lo mismo desde dos pantallas distintas. Al registrar un gasto NO se
+manda `created_by`: lo pone el disparador con `auth.uid()`.
 
 **Altas de personal desde la aplicación**: el propietario crea usuarios en la
 pestaña Sucursales y usuarios. Se hace con `signUp()` sobre un **cliente de

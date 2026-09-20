@@ -474,7 +474,8 @@ function renderAll() {
     renderClosing();
     fillConfigForm();
   }
-  if (canManage()) fillDashLocationPicker();
+  if (canManage()) { fillDashLocationPicker(); llenarSelectoresGastos(); }
+  if (GAS.loaded) renderGastos();
   if (isOwner()) { fillReportLocationPicker(); renderAdmin(); }
   if (DASH.loaded) renderDashboard();
 }
@@ -491,6 +492,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     // El tablero pide números al servidor, así que no se carga hasta que
     // alguien lo abre. Después se refresca solo al cambiar los filtros.
     if (btn.dataset.tab === "dashboard" && !DASH.loaded) loadDashboard();
+    if (btn.dataset.tab === "gastos" && !GAS.loaded) cargarGastos();
   });
 });
 
@@ -1613,6 +1615,200 @@ if (!scaleSupported()) {
 }
 
 
+
+/* ===========================================================================
+   MOTOR DE GRÁFICAS (SVG a mano)
+   ---------------------------------------------------------------------------
+   No hay librería de gráficas y no puede haberla: la política de seguridad
+   del sitio es script-src 'self', o sea que el navegador no ejecuta código
+   traído de otro dominio. Tampoco hace falta — todo lo que este negocio
+   necesita graficar son barras, una línea y una barra apilada.
+
+   Reglas que siguen todas:
+     · Un solo eje. Nunca dos escalas en la misma gráfica.
+     · El color significa lo mismo siempre: verde lo que se queda, rojo lo
+       que sale, azul volumen.
+     · Rojo y verde juntos son difíciles para daltonismo rojo-verde, así que
+       donde aparecen juntos SIEMPRE hay etiqueta de texto además del color.
+     · Cada barra lleva <title>, que el navegador muestra al pasar encima.
+   =========================================================================== */
+const VIZ = { W: 720, H: 200, padL: 48, padR: 12, padT: 12, padB: 26 };
+
+const vizNum = (v) => Math.abs(v) >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + "k"
+                    : String(Math.round(v * 10) / 10);
+
+function vizVacio(box, mensaje) {
+  box.innerHTML = `<div class="chart-empty">${esc(mensaje)}</div>`;
+}
+
+// Rejilla horizontal + etiquetas del eje vertical.
+function vizRejilla(max, y, W, padL, padR) {
+  let out = "";
+  for (let k = 0; k <= 4; k++) {
+    const v = (max / 4) * k, yy = y(v).toFixed(1);
+    out += `<line class="chart-axis" x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}"/>`;
+    out += `<text class="chart-label" x="${padL - 6}" y="${(+yy + 3).toFixed(1)}" text-anchor="end">${vizNum(v)}</text>`;
+  }
+  return out;
+}
+
+/* Barras verticales. series = [{clave, valor, titulo}], una sola serie. */
+function vizBarras(box, series, opciones) {
+  const o = Object.assign({ color: "fill-neutral", etiquetaX: (d) => d.clave, maxEtiquetas: 12 }, opciones || {});
+  if (!series.length || series.every((d) => !d.valor)) { vizVacio(box, o.vacio || "Sin datos en este periodo."); return; }
+  const { W, H, padL, padR, padT, padB } = VIZ;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const max = Math.max(...series.map((d) => d.valor), 1);
+  const slot = innerW / series.length;
+  const bw = Math.max(3, Math.min(40, slot - 4));   // 4px de aire entre barras
+  const y = (v) => padT + innerH - (v / max) * innerH;
+
+  let barras = "";
+  series.forEach((d, i) => {
+    const x = padL + i * slot + (slot - bw) / 2;
+    const alto = Math.max(0, padT + innerH - y(d.valor));
+    barras += `<g data-mark><title>${esc(d.titulo || `${d.clave}: ${d.valor}`)}</title>` +
+      `<rect class="${o.color}" x="${x.toFixed(1)}" y="${y(d.valor).toFixed(1)}" width="${bw.toFixed(1)}" height="${alto.toFixed(1)}" rx="4"/></g>`;
+  });
+
+  const paso = Math.ceil(series.length / o.maxEtiquetas);
+  let etiquetas = "";
+  series.forEach((d, i) => {
+    if (i % paso) return;
+    etiquetas += `<text class="chart-label" x="${(padL + i * slot + slot / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle">${esc(o.etiquetaX(d))}</text>`;
+  });
+
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.aria || "gráfica de barras")}">
+    ${vizRejilla(max, y, W, padL, padR)}${barras}${etiquetas}</svg>`;
+}
+
+/* Barras horizontales: para categorías con nombre largo (toppings, gastos). */
+function vizBarrasH(box, series, opciones) {
+  const o = Object.assign({ color: "fill-neutral", formato: (v) => vizNum(v), max: 8 }, opciones || {});
+  const datos = series.slice(0, o.max);
+  if (!datos.length || datos.every((d) => !d.valor)) { vizVacio(box, o.vacio || "Sin datos en este periodo."); return; }
+  const filaH = 26, padL = 150, padR = 60, padT = 6;
+  const W = 720, H = padT * 2 + datos.length * filaH;
+  const innerW = W - padL - padR;
+  const max = Math.max(...datos.map((d) => d.valor), 1);
+
+  const filas = datos.map((d, i) => {
+    const y = padT + i * filaH;
+    const ancho = Math.max(2, (d.valor / max) * innerW);
+    // El nombre se recorta para que no se monte sobre la barra.
+    const nombre = d.clave.length > 22 ? d.clave.slice(0, 21) + "…" : d.clave;
+    return `<g data-mark><title>${esc(d.titulo || `${d.clave}: ${o.formato(d.valor)}`)}</title>` +
+      `<text class="chart-label" x="${padL - 8}" y="${y + filaH / 2 + 3}" text-anchor="end">${esc(nombre)}</text>` +
+      `<rect class="${o.color}" x="${padL}" y="${y + 4}" width="${ancho.toFixed(1)}" height="${filaH - 10}" rx="4"/>` +
+      `<text class="chart-value" x="${(padL + ancho + 6).toFixed(1)}" y="${y + filaH / 2 + 3}">${esc(o.formato(d.valor))}</text></g>`;
+  }).join("");
+
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.aria || "gráfica de barras")}">${filas}</svg>`;
+}
+
+/* Dos series de barras lado a lado (ingresos contra gastos). */
+function vizBarrasDobles(box, series, opciones) {
+  const o = Object.assign({}, opciones || {});
+  if (!series.length || series.every((d) => !d.a && !d.b)) { vizVacio(box, "Sin movimientos en este periodo."); return; }
+  const { W, H, padL, padR, padT, padB } = VIZ;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const max = Math.max(...series.map((d) => Math.max(d.a, d.b)), 1);
+  const slot = innerW / series.length;
+  const bw = Math.max(2, Math.min(16, slot / 2 - 1));   // el -1 deja el aire entre las dos
+  const y = (v) => padT + innerH - (v / max) * innerH;
+  const prom = series.reduce((x, d) => x + d.a, 0) / series.length;
+
+  let barras = "";
+  series.forEach((d, i) => {
+    const cx = padL + i * slot + slot / 2;
+    barras += `<g data-mark><title>${esc(d.titulo)}</title>` +
+      `<rect class="fill-ok"  x="${(cx - bw - 1).toFixed(1)}" y="${y(d.a).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, padT + innerH - y(d.a)).toFixed(1)}" rx="3"/>` +
+      `<rect class="fill-bad" x="${(cx + 1).toFixed(1)}" y="${y(d.b).toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0, padT + innerH - y(d.b)).toFixed(1)}" rx="3"/></g>`;
+  });
+
+  const paso = Math.ceil(series.length / 8);
+  let etiquetas = "";
+  series.forEach((d, i) => { if (i % paso) return;
+    etiquetas += `<text class="chart-label" x="${(padL + i * slot + slot / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle">${esc(d.clave)}</text>`; });
+
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="ingresos y gastos por periodo">
+    ${vizRejilla(max, y, W, padL, padR)}${barras}
+    <line x1="${padL}" y1="${y(prom).toFixed(1)}" x2="${W - padR}" y2="${y(prom).toFixed(1)}"
+          stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="4 3"/>
+    ${etiquetas}</svg>`;
+  return prom;
+}
+
+/* Barra apilada horizontal: en qué se reparte cada lempira que entra. */
+function vizApilada(box, segmentos) {
+  const total = segmentos.reduce((a, s) => a + Math.max(0, s.valor), 0);
+  if (!(total > 0)) { vizVacio(box, "Todavía no hay ingresos en este periodo."); return; }
+  const W = 720, H = 92, padL = 0, barY = 10, barH = 34;
+  const innerW = W - padL;
+  let x = padL, barras = "", leyenda = "", lx = 0;
+
+  segmentos.forEach((s) => {
+    const v = Math.max(0, s.valor);
+    const pct = (100 * v) / total;
+    let w = (v / total) * innerW;
+    if (w > 2) w -= 2;                       // 2px de aire entre segmentos
+    if (v > 0) {
+      barras += `<g data-mark><title>${esc(`${s.nombre}: ${dmoney(s.valor)} (${r2(pct)}%)`)}</title>` +
+        `<rect class="${s.color}" x="${x.toFixed(1)}" y="${barY}" width="${Math.max(1, w).toFixed(1)}" height="${barH}" rx="4"/>`;
+      // Rojo y verde juntos: la etiqueta dentro de la barra no es decoración,
+      // es lo que hace legible la gráfica sin distinguir color.
+      if (pct >= 11) {
+        barras += `<text x="${(x + w / 2).toFixed(1)}" y="${barY + barH / 2 + 4}" text-anchor="middle"
+                    fill="#fff" font-family="var(--font)" font-size="11" font-weight="700">${r2(pct)}%</text>`;
+      }
+      barras += `</g>`;
+      x += (v / total) * innerW;
+    }
+    leyenda += `<g><rect class="${s.color}" x="${lx}" y="${H - 16}" width="10" height="10" rx="2"/>` +
+      `<text class="chart-label" x="${lx + 15}" y="${H - 7}">${esc(s.nombre)} ${dmoney(s.valor)}</text></g>`;
+    lx += 26 + Math.max(90, s.nombre.length * 6.2 + String(dmoney(s.valor)).length * 6.2);
+  });
+
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="reparto de los ingresos">${barras}${leyenda}</svg>`;
+}
+
+/* Línea: para una tendencia (el margen %). */
+function vizLinea(box, series, opciones) {
+  const o = Object.assign({ sufijo: "%", vacio: "Sin datos en este periodo." }, opciones || {});
+  const conDato = series.filter((d) => d.valor !== null);
+  if (conDato.length < 2) { vizVacio(box, o.vacio); return; }
+  const { W, H, padL, padR, padT, padB } = VIZ;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const max = Math.max(...conDato.map((d) => d.valor), o.min100 ? 100 : 1);
+  const min = Math.min(...conDato.map((d) => d.valor), 0);
+  const y = (v) => padT + innerH - ((v - min) / ((max - min) || 1)) * innerH;
+  const x = (i) => padL + (series.length === 1 ? innerW / 2 : (i / (series.length - 1)) * innerW);
+
+  let d = "", puntos = "", abierto = false;
+  series.forEach((p, i) => {
+    if (p.valor === null) { abierto = false; return; }   // días sin ventas cortan la línea
+    d += (abierto ? " L " : " M ") + x(i).toFixed(1) + " " + y(p.valor).toFixed(1);
+    abierto = true;
+    puntos += `<g data-mark><title>${esc(`${p.clave}: ${r2(p.valor)}${o.sufijo}`)}</title>` +
+      `<circle cx="${x(i).toFixed(1)}" cy="${y(p.valor).toFixed(1)}" r="4" class="${o.color || "fill-ok"}"
+        stroke="var(--surface)" stroke-width="2"/></g>`;
+  });
+
+  let rejilla = "";
+  for (let k = 0; k <= 4; k++) {
+    const v = min + ((max - min) / 4) * k, yy = y(v).toFixed(1);
+    rejilla += `<line class="chart-axis" x1="${padL}" y1="${yy}" x2="${W - padR}" y2="${yy}"/>`;
+    rejilla += `<text class="chart-label" x="${padL - 6}" y="${(+yy + 3).toFixed(1)}" text-anchor="end">${vizNum(v)}${o.sufijo}</text>`;
+  }
+  const paso = Math.ceil(series.length / 8);
+  let etiquetas = "";
+  series.forEach((p, i) => { if (i % paso) return;
+    etiquetas += `<text class="chart-label" x="${x(i).toFixed(1)}" y="${H - 8}" text-anchor="middle">${esc(p.clave)}</text>`; });
+
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(o.aria || "tendencia")}">
+    ${rejilla}<path d="${d}" class="stroke-ok"/>${puntos}${etiquetas}</svg>`;
+}
+
 /* ===========================================================================
    15. DASHBOARD
    ---------------------------------------------------------------------------
@@ -1848,25 +2044,29 @@ function renderDashboard() {
     kpi("Helado vendido", fmtWeightShort(t.helado), prefUnit() === "oz" ? `${r2(t.helado)} g` : `${r2(toOz(t.helado))} oz`) +
     kpi("Toppings vendidos", fmtWeightShort(t.toppings), prefUnit() === "oz" ? `${r2(t.toppings)} g` : `${r2(toOz(t.toppings))} oz`);
 
-  renderDashChart(serie);
+  renderDashCharts(serie, t);
   renderDashStores();
   renderDashProjection(serie, t);
-  renderDashExpenses();
   renderDashAudit();
   renderDashToppings();
 }
 
-/* --- Gráfica de barras en SVG ---------------------------------------------
-   Si el periodo es largo, los días se agrupan por semana: 90 barras en un
-   celular no se leen. */
-function renderDashChart(serie) {
-  const box = $("dash-chart");
-  if (!serie.length || serie.every((d) => !d.ingresos && !d.gastos)) {
-    box.innerHTML = '<div class="chart-empty">No hay movimientos en este periodo.</div>';
-    $("dash-chart-legend").innerHTML = "";
-    return;
+/* --- Las gráficas del tablero --------------------------------------------- */
+const DIAS_SEMANA = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+
+function renderDashCharts(serie, t) {
+  // 1. A dónde va cada lempira. Es la gráfica que contesta "¿gano o no?".
+  vizApilada($("chart-composicion"), [
+    { nombre: "Costo del producto", valor: t.costos,   color: "fill-neutral" },
+    { nombre: "Gastos de operar",   valor: t.gastos,   color: "fill-bad" },
+    { nombre: "Utilidad",           valor: t.utilidad, color: "fill-ok" },
+  ]);
+  if (t.utilidad < 0) {
+    $("chart-composicion").innerHTML +=
+      `<div class="alert warn">En este periodo los gastos se comieron el margen: la utilidad es ${dmoney(t.utilidad)}. La barra solo reparte lo que entró.</div>`;
   }
 
+  // 2. Ingresos contra gastos, día por día (o por semana si el periodo es largo).
   let puntos = serie, agrupado = false;
   if (serie.length > 45) {
     agrupado = true;
@@ -1879,55 +2079,78 @@ function renderDashChart(serie) {
     });
     puntos = [...by.values()].sort((a, b) => (a.dia < b.dia ? -1 : 1));
   }
+  const prom = vizBarrasDobles($("dash-chart"), puntos.map((d) => ({
+    clave: fechaCorta(d.dia), a: d.ingresos, b: d.gastos,
+    titulo: `${fechaCorta(d.dia)}${agrupado ? " (semana)" : ""} — ingresos ${dmoney(d.ingresos)}, gastos ${dmoney(d.gastos)}`,
+  })));
+  $("dash-chart-legend").innerHTML = prom == null ? "" :
+    `<span><i class="income"></i> Ingresos</span><span><i class="expense"></i> Gastos</span>` +
+    `<span><i class="avg"></i> Promedio: ${dmoney(prom)} por ${agrupado ? "semana" : "día"}</span>`;
 
-  const W = 720, H = 220, padL = 52, padR = 10, padT = 12, padB = 26;
-  const innerW = W - padL - padR, innerH = H - padT - padB;
-  const max = Math.max(...puntos.map((d) => Math.max(d.ingresos, d.gastos)), 1);
-  const slot = innerW / puntos.length;
-  const bw = Math.max(2, Math.min(18, slot / 2 - 1));
-  const y = (v) => padT + innerH - (v / max) * innerH;
-
-  const avg = puntos.reduce((a, d) => a + d.ingresos, 0) / puntos.length;
-  const nice = (v) => v >= 1000 ? (v / 1000).toFixed(1) + "k" : String(Math.round(v));
-
-  let bars = "";
-  puntos.forEach((d, i) => {
-    const x = padL + i * slot + slot / 2;
-    const hi = Math.max(0, padT + innerH - y(d.ingresos));
-    const hg = Math.max(0, padT + innerH - y(d.gastos));
-    const t = `${fechaCorta(d.dia)}${agrupado ? " (semana)" : ""} — ingresos ${dmoney(d.ingresos)}, gastos ${dmoney(d.gastos)}`;
-    bars += `<g><title>${esc(t)}</title>`;
-    bars += `<rect class="chart-bar-income" x="${(x - bw - 0.5).toFixed(1)}" y="${y(d.ingresos).toFixed(1)}" width="${bw.toFixed(1)}" height="${hi.toFixed(1)}" rx="2"/>`;
-    bars += `<rect class="chart-bar-expense" x="${(x + 0.5).toFixed(1)}" y="${y(d.gastos).toFixed(1)}" width="${bw.toFixed(1)}" height="${hg.toFixed(1)}" rx="2"/>`;
-    bars += `</g>`;
+  // 3. Por día de la semana. Se saca de la misma serie, no hace falta pedir
+  //    nada más al servidor.
+  const semana = DIAS_SEMANA.map((n) => ({ clave: n, valor: 0, dias: 0 }));
+  serie.forEach((d) => {
+    const i = (new Date(d.dia + "T12:00:00").getDay() + 6) % 7;   // lunes = 0
+    semana[i].valor += d.ingresos; semana[i].dias += 1;
   });
+  vizBarras($("chart-semana"), semana.map((d) => ({
+    clave: d.clave, valor: d.valor,
+    titulo: `${d.clave}: ${dmoney(d.valor)} en ${d.dias} ${d.dias === 1 ? "día" : "días"}` +
+            (d.dias ? ` (${dmoney(d.valor / d.dias)} por ${d.clave.toLowerCase()})` : ""),
+  })), { etiquetaX: (d) => d.clave.slice(0, 3), aria: "ingresos por día de la semana",
+         vacio: "Sin ventas en este periodo." });
 
-  let ticks = "";
-  for (let k = 0; k <= 4; k++) {
-    const v = (max / 4) * k, yy = y(v);
-    ticks += `<line class="chart-axis" x1="${padL}" y1="${yy.toFixed(1)}" x2="${W - padR}" y2="${yy.toFixed(1)}" opacity="0.35"/>`;
-    ticks += `<text class="chart-label" x="${padL - 6}" y="${(yy + 3).toFixed(1)}" text-anchor="end">${nice(v)}</text>`;
+  // 4. Por hora. Esta sí viene del servidor: las ventas guardan la hora exacta.
+  const horas = new Map();
+  DASH.results.forEach((r) => (r.por_hora || []).forEach((h) => {
+    const cur = horas.get(h.hora) || { ventas: 0, ingresos: 0 };
+    cur.ventas += Number(h.ventas || 0); cur.ingresos += Number(h.ingresos || 0);
+    horas.set(h.hora, cur);
+  }));
+  // Solo de la primera a la última hora con movimiento: 24 barras, veinte de
+  // ellas en cero, no dicen nada.
+  const conVenta = [...horas.entries()].filter(([, v]) => v.ventas > 0).map(([h]) => h);
+  const desde = conVenta.length ? Math.min(...conVenta) : 8;
+  const hasta = conVenta.length ? Math.max(...conVenta) : 20;
+  const serieHoras = [];
+  for (let h = desde; h <= hasta; h++) {
+    const v = horas.get(h) || { ventas: 0, ingresos: 0 };
+    serieHoras.push({ clave: String(h), valor: v.ingresos,
+      titulo: `${h}:00 a ${h}:59 — ${v.ventas} venta(s), ${dmoney(v.ingresos)}` });
   }
+  vizBarras($("chart-hora"), serieHoras, {
+    etiquetaX: (d) => `${d.clave}h`, aria: "ingresos por hora del día",
+    vacio: "Sin ventas en este periodo.", maxEtiquetas: 14 });
 
-  const paso = Math.ceil(puntos.length / 8);
-  let labels = "";
-  puntos.forEach((d, i) => {
-    if (i % paso) return;
-    const x = padL + i * slot + slot / 2;
-    labels += `<text class="chart-label" x="${x.toFixed(1)}" y="${H - 8}" text-anchor="middle">${fechaCorta(d.dia)}</text>`;
-  });
+  // 5. Toppings más vendidos, por peso.
+  const agg = {};
+  DASH.results.forEach((r) => (r.toppings || []).forEach((x) => {
+    agg[x.name] = (agg[x.name] || 0) + Number(x.peso_g || 0);
+  }));
+  const tops = Object.entries(agg).map(([clave, valor]) => ({ clave, valor }))
+                     .sort((a, b) => b.valor - a.valor);
+  vizBarrasH($("chart-toppings"), tops, {
+    formato: (v) => fmtWeightShort(v), aria: "toppings más vendidos",
+    vacio: "No se vendieron toppings en este periodo." });
 
-  const avgY = y(avg).toFixed(1);
-  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" preserveAspectRatio="xMidYMid meet"
-      aria-label="Ingresos y gastos por ${agrupado ? "semana" : "día"}">
-    ${ticks}${bars}
-    <line class="chart-avg-line" x1="${padL}" y1="${avgY}" x2="${W - padR}" y2="${avgY}"/>
-  </svg>`;
+  // 6. Margen del día. null en los días sin ventas: dibujar 0% ahí sería
+  //    mentir — no es que el margen se haya caído, es que no se vendió.
+  vizLinea($("chart-margen"), serie.map((d) => ({
+    clave: fechaCorta(d.dia),
+    valor: d.ingresos > 0 ? r2((100 * d.margen) / d.ingresos) : null,
+  })), { sufijo: "%", aria: "margen por día", vacio: "Hacen falta al menos dos días con ventas." });
 
-  $("dash-chart-legend").innerHTML =
-    `<span><i class="income"></i> Ingresos</span>` +
-    `<span><i class="expense"></i> Gastos</span>` +
-    `<span><i class="avg"></i> Promedio de ingresos: ${dmoney(avg)} por ${agrupado ? "semana" : "día"}</span>`;
+  // 7. Gastos por categoría (resumen; el detalle vive en la pestaña Gastos).
+  const cats = {};
+  DASH.results.forEach((r) => (r.gastos_categoria || []).forEach((c) => {
+    cats[c.categoria] = (cats[c.categoria] || 0) + Number(c.monto || 0);
+  }));
+  vizBarrasH($("chart-gastos-cat"),
+    Object.entries(cats).map(([k, v]) => ({ clave: EXPENSE_LABELS[k] || k, valor: v }))
+          .sort((a, b) => b.valor - a.valor),
+    { color: "fill-bad", formato: (v) => dmoney(v), aria: "gastos por categoría",
+      vacio: "No hay gastos registrados en este periodo." });
 }
 
 function fechaCorta(iso) { const p = iso.split("-"); return `${p[2]}/${p[1]}`; }
@@ -2003,76 +2226,8 @@ function renderDashProjection(serie, t) {
     `No toma en cuenta fines de semana, feriados ni temporada.` + conf;
 }
 
-/* --- Gastos ---------------------------------------------------------------- */
-function renderDashExpenses() {
-  const cats = {};
-  DASH.results.forEach((r) => (r.gastos_categoria || []).forEach((c) => {
-    cats[c.categoria] = (cats[c.categoria] || 0) + Number(c.monto || 0);
-  }));
-  const total = Object.values(cats).reduce((a, b) => a + b, 0);
-  const entries = Object.entries(cats).sort((a, b) => b[1] - a[1]);
-
-  $("dash-expense-cats").innerHTML = entries.length
-    ? entries.map(([c, m]) => `<div class="kpi">
-        <div class="kpi-label">${esc(EXPENSE_LABELS[c] || c)}</div>
-        <div class="kpi-value num">${dmoney(m)}</div>
-        <div class="kpi-sub">${total > 0 ? r2((100 * m) / total) : 0}% de los gastos</div></div>`).join("")
-    : '<p class="hint">No hay gastos registrados en este periodo.</p>';
-
-  const body = document.querySelector("#table-expenses tbody");
-  body.innerHTML = DASH.expenses.length ? "" :
-    '<tr><td colspan="6" class="hint">Sin gastos en este periodo.</td></tr>';
-  DASH.expenses.forEach((g) => {
-    const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${esc(fechaCorta(g.spent_on))}/${esc(g.spent_on.slice(0, 4))}</td>
-      <td>${esc((g.locations && g.locations.name) || "")}</td>
-      <td>${esc(EXPENSE_LABELS[g.category] || g.category)}</td>
-      <td>${esc(g.description || "")}</td>
-      <td class="num">${dmoney(g.amount)}</td>
-      <td><div class="row-actions"><button class="icon-btn delete btn-del" type="button" title="Eliminar">${ICON_TRASH}</button></div></td>`;
-    tr.querySelector(".btn-del").addEventListener("click", async () => {
-      if (!confirm(`¿Eliminar el gasto de ${dmoney(g.amount)}?`)) return;
-      const { error } = await sb.from("expenses").delete().eq("id", g.id);
-      if (error) { alert(`No se pudo eliminar: ${error.message}`); return; }
-      await loadDashboard();
-    });
-    body.appendChild(tr);
-  });
-
-  const ids = dashScopeIds();
-  const target = ids.length === 1 ? ids[0] : STATE.activeLocationId;
-  const tLoc = STATE.locations.find((l) => l.id === target);
-  $("ne-target").textContent = tLoc
-    ? (ids.length === 1
-        ? `El gasto se registrará en ${tLoc.name}.`
-        : `Estás viendo el consolidado: el gasto se registrará en ${tLoc.name}. Si es de otra tienda, selecciónala arriba primero.`)
-    : "";
-  if (!$("ne-date").value) $("ne-date").value = localDateStr();
-}
-
-$("btn-add-expense").addEventListener("click", async () => {
-  const msg = $("ne-msg");
-  const monto = parseFloat($("ne-amount").value);
-  if (!(monto > 0)) { msg.textContent = "Pon un monto mayor a cero."; return; }
-  const ids = dashScopeIds();
-  const target = ids.length === 1 ? ids[0] : STATE.activeLocationId;
-  if (!target) { msg.textContent = "No hay una tienda seleccionada."; return; }
-
-  const { error } = await sb.from("expenses").insert({
-    location_id: target,
-    spent_on: $("ne-date").value || localDateStr(),
-    category: $("ne-cat").value,
-    description: $("ne-desc").value.trim() || null,
-    amount: monto,
-    created_by: STATE.profile.id,
-  });
-  if (error) { msg.textContent = `No se pudo registrar: ${error.message}`; return; }
-  msg.textContent = "Gasto registrado.";
-  $("ne-desc").value = ""; $("ne-amount").value = "";
-  await loadDashboard();
-  setTimeout(() => (msg.textContent = ""), 2500);
-});
-
+/* --- Gastos: en el tablero solo el resumen; la administración está en su
+       propia pestaña, para no tener dos lugares donde editar lo mismo. ----- */
 /* --- Rastro de auditoría ---------------------------------------------------
    Solo se muestra lo que la base dejó pasar. La cajera no llega aquí (no ve
    la pestaña) y aunque llegara, sus consultas volverían vacías. */
@@ -2176,6 +2331,248 @@ function renderDashToppings() {
     body.appendChild(tr);
   });
 }
+
+
+/* ===========================================================================
+   CENTRO DE GASTOS
+   ---------------------------------------------------------------------------
+   Los gastos son la mitad que faltaba para saber si la tienda gana: el margen
+   del producto no sirve de nada si la renta se lo come. Aquí se registran, se
+   corrigen y se miran; el tablero solo muestra el resumen, para que no haya
+   dos lugares donde editar lo mismo.
+
+   La base es la que manda: una gerente solo ve y toca los de SU tienda, y una
+   cajera no llega aquí. Eso no depende de esta pantalla.
+   =========================================================================== */
+const GAS = { rows: [], from: null, to: null, loaded: false };
+
+function gasRange() {
+  const hoy = new Date();
+  switch ($("gas-range").value) {
+    case "semana":      return { from: startOfWeek(hoy), to: hoy };
+    case "mes":         return { from: startOfMonth(hoy), to: hoy };
+    case "mes_pasado":  { const i = startOfMonth(addDays(startOfMonth(hoy), -1)); return { from: i, to: endOfMonth(i) }; }
+    case "30d":         return { from: addDays(hoy, -29), to: hoy };
+    case "90d":         return { from: addDays(hoy, -89), to: hoy };
+    case "anio":        return { from: new Date(hoy.getFullYear(), 0, 1), to: hoy };
+    default: {
+      const f = $("gas-from").value, t = $("gas-to").value;
+      return { from: f ? new Date(f + "T12:00:00") : startOfMonth(hoy),
+               to:   t ? new Date(t + "T12:00:00") : hoy };
+    }
+  }
+}
+
+function gasScopeIds() {
+  if (!isOwner()) return [STATE.profile.location_id];
+  const v = $("gas-location").value;
+  return v === "__all__" ? STATE.locations.filter((l) => l.active).map((l) => l.id) : [v];
+}
+// El gasto se registra en la tienda seleccionada; en el consolidado, en la que
+// el usuario tenga abierta. El texto de abajo del formulario siempre lo dice.
+function gasTargetId() {
+  const ids = gasScopeIds();
+  return ids.length === 1 ? ids[0] : STATE.activeLocationId;
+}
+function gasCurrency() {
+  const loc = STATE.locations.find((l) => l.id === gasScopeIds()[0]);
+  return (loc && loc.currency_code) || "";
+}
+function gmoney(v) { return `${gasCurrency()} ${(Number(v) || 0).toFixed(2)}`; }
+
+function llenarSelectoresGastos() {
+  const sel = $("gas-location"), keep = sel.value;
+  sel.innerHTML = "";
+  if (isOwner()) {
+    sel.innerHTML = '<option value="__all__">Todas las tiendas</option>';
+    STATE.locations.forEach((l) => {
+      const o = document.createElement("option"); o.value = l.id; o.textContent = l.name; sel.appendChild(o);
+    });
+    sel.value = keep || "__all__";
+  } else {
+    const loc = activeLocation();
+    const o = document.createElement("option");
+    o.value = STATE.profile.location_id; o.textContent = loc ? loc.name : "Mi tienda";
+    sel.appendChild(o);
+  }
+  sel.disabled = !isOwner();
+
+  const cats = Object.entries(EXPENSE_LABELS);
+  const f = $("gas-cat-filter"), keepF = f.value;
+  f.innerHTML = '<option value="">Todas las categorías</option>' +
+    cats.map(([k, v]) => `<option value="${esc(k)}">${esc(v)}</option>`).join("");
+  f.value = keepF || "";
+  const n = $("ng-cat"), keepN = n.value;
+  n.innerHTML = cats.map(([k, v]) => `<option value="${esc(k)}">${esc(v)}</option>`).join("");
+  n.value = keepN || "renta";
+  if (!$("ng-date").value) $("ng-date").value = localDateStr();
+}
+
+$("gas-range").addEventListener("change", () => {
+  const c = $("gas-range").value === "personalizado";
+  $("gas-custom-from").hidden = !c; $("gas-custom-to").hidden = !c;
+  if (!c) cargarGastos();
+});
+["gas-location", "gas-cat-filter"].forEach((id) => $(id).addEventListener("change", cargarGastos));
+["gas-from", "gas-to"].forEach((id) => $(id).addEventListener("change", () => {
+  if ($("gas-range").value === "personalizado") cargarGastos();
+}));
+$("btn-gas-refresh").addEventListener("click", cargarGastos);
+
+async function cargarGastos() {
+  if (!canManage()) return;
+  const avisos = $("gas-warnings");
+  if (!navigator.onLine) {
+    avisos.innerHTML = '<div class="alert warn">Sin conexión: los gastos necesitan internet. La pantalla de venta sí sigue funcionando.</div>';
+    return;
+  }
+  const { from, to } = gasRange();
+  if (from > to) { avisos.innerHTML = '<div class="alert bad">La fecha "desde" es posterior a la fecha "hasta".</div>'; return; }
+  GAS.from = localDateStr(from); GAS.to = localDateStr(to);
+
+  const ids = gasScopeIds().filter(Boolean);
+  let q = sb.from("expenses").select("*, locations(name)")
+            .gte("spent_on", GAS.from).lte("spent_on", GAS.to)
+            .order("spent_on", { ascending: false }).limit(500);
+  if (ids.length === 1) q = q.eq("location_id", ids[0]);
+  const cat = $("gas-cat-filter").value;
+  if (cat) q = q.eq("category", cat);
+
+  const { data, error } = await q;
+  if (error) { avisos.innerHTML = `<div class="alert bad">No se pudieron cargar: ${esc(error.message)}</div>`; return; }
+  GAS.rows = data || [];
+
+  // Quién registró cada gasto: se resuelve con los perfiles que ya tenemos,
+  // y solo el propietario los carga. Para una gerente queda en blanco, que es
+  // correcto: ella no tiene por qué ver el directorio completo del personal.
+  GAS.loaded = true;
+  avisos.innerHTML = "";
+  renderGastos();
+}
+
+function renderGastos() {
+  const ids = gasScopeIds();
+  const nombre = ids.length > 1 ? "Todas las tiendas"
+               : (STATE.locations.find((l) => l.id === ids[0]) || {}).name || "";
+  const fmt = (iso) => { const [y, m, d] = iso.split("-"); return `${d}/${m}/${y}`; };
+  const dias = Math.round((new Date(GAS.to + "T12:00:00") - new Date(GAS.from + "T12:00:00")) / 86400000) + 1;
+  $("gas-range-label").textContent = `Mostrando ${nombre} — del ${fmt(GAS.from)} al ${fmt(GAS.to)} (${dias} día${dias === 1 ? "" : "s"}).`;
+  $("gas-print-head").innerHTML = logoHtml() + `<strong>${esc(nombre)}</strong> — gastos del ${fmt(GAS.from)} al ${fmt(GAS.to)}`;
+
+  const total = GAS.rows.reduce((a, g) => a + Number(g.amount || 0), 0);
+  const porCat = {};
+  GAS.rows.forEach((g) => { porCat[g.category] = (porCat[g.category] || 0) + Number(g.amount || 0); });
+  const cats = Object.entries(porCat).sort((a, b) => b[1] - a[1]);
+  const mayor = cats[0];
+
+  const kpi = (l, v, sub) => `<div class="kpi"><div class="kpi-label">${l}</div>
+    <div class="kpi-value num">${v}</div>${sub ? `<div class="kpi-sub">${sub}</div>` : ""}</div>`;
+  $("gas-kpis").innerHTML =
+    kpi("Total del periodo", gmoney(total), `${GAS.rows.length} registro(s)`) +
+    kpi("Promedio diario", gmoney(dias ? total / dias : 0), `sobre ${dias} día${dias === 1 ? "" : "s"}`) +
+    kpi("Proyección al mes", gmoney(dias ? (total / dias) * 30 : 0), "a este ritmo, 30 días") +
+    (mayor ? kpi("Mayor categoría", esc(EXPENSE_LABELS[mayor[0]] || mayor[0]),
+                 `${gmoney(mayor[1])} · ${total > 0 ? r2((100 * mayor[1]) / total) : 0}% del total`) : "");
+
+  vizBarrasH($("gas-chart-cat"),
+    cats.map(([k, v]) => ({ clave: EXPENSE_LABELS[k] || k, valor: v,
+      titulo: `${EXPENSE_LABELS[k] || k}: ${gmoney(v)} (${total > 0 ? r2((100 * v) / total) : 0}% del total)` })),
+    { color: "fill-bad", formato: (v) => gmoney(v), aria: "gastos por categoría",
+      vacio: "No hay gastos registrados en este periodo." });
+
+  // Un día por barra, con los días sin gasto en cero: si se saltaran, el
+  // gráfico daría la impresión de que se gasta todos los días.
+  const porDia = new Map();
+  for (let d = new Date(GAS.from + "T12:00:00"); localDateStr(d) <= GAS.to; d = addDays(d, 1)) {
+    porDia.set(localDateStr(d), 0);
+  }
+  GAS.rows.forEach((g) => { if (porDia.has(g.spent_on)) porDia.set(g.spent_on, porDia.get(g.spent_on) + Number(g.amount || 0)); });
+  const serieDias = [...porDia.entries()].map(([dia, v]) => ({
+    clave: fechaCorta(dia), valor: v, titulo: `${fechaCorta(dia)}: ${gmoney(v)}` }));
+  vizBarras($("gas-chart-tiempo"), serieDias,
+    { color: "fill-bad", aria: "gastos por día", vacio: "No hay gastos registrados en este periodo." });
+
+  const tLoc = STATE.locations.find((l) => l.id === gasTargetId());
+  $("ng-target").textContent = tLoc
+    ? (ids.length === 1 ? `Se registrará en ${tLoc.name}.`
+       : `Estás viendo todas las tiendas: se registrará en ${tLoc.name}. Si es de otra, selecciónala arriba primero.`)
+    : "Selecciona una tienda arriba.";
+
+  renderTablaGastos();
+  $("gas-total-hint").textContent = GAS.rows.length
+    ? `${GAS.rows.length} gasto(s), ${gmoney(total)} en total.` : "";
+}
+
+function renderTablaGastos() {
+  const body = document.querySelector("#table-gastos tbody");
+  body.innerHTML = GAS.rows.length ? "" :
+    '<tr><td colspan="7" class="hint">Sin gastos en este periodo. Regístralos arriba.</td></tr>';
+  const quien = (id) => (STATE.profiles.find((x) => x.id === id) || {}).full_name || "";
+
+  GAS.rows.forEach((g) => {
+    const tr = document.createElement("tr");
+    const opciones = Object.entries(EXPENSE_LABELS)
+      .map(([k, v]) => `<option value="${esc(k)}"${g.category === k ? " selected" : ""}>${esc(v)}</option>`).join("");
+    tr.innerHTML = `
+      <td><input type="date" value="${esc(g.spent_on)}" data-field="spent_on"></td>
+      <td>${esc((g.locations && g.locations.name) || "")}</td>
+      <td><select data-field="category">${opciones}</select></td>
+      <td><input type="text" value="${esc(g.description || "")}" data-field="description"></td>
+      <td><input type="number" step="0.01" min="0" value="${esc(g.amount)}" data-field="amount"></td>
+      <td>${esc(quien(g.created_by))}</td>
+      <td>${rowActionsHtml()}</td>`;
+
+    tr.querySelector(".btn-save").addEventListener("click", async () => {
+      const monto = parseFloat(tr.querySelector('[data-field="amount"]').value);
+      if (!(monto >= 0)) { alert("El monto no puede ser negativo."); return; }
+      const { error } = await sb.from("expenses").update({
+        spent_on: tr.querySelector('[data-field="spent_on"]').value,
+        category: tr.querySelector('[data-field="category"]').value,
+        description: tr.querySelector('[data-field="description"]').value.trim() || null,
+        amount: monto,
+      }).eq("id", g.id);
+      if (error) { alert(`No se pudo guardar: ${error.message}`); return; }
+      await cargarGastos();
+      if (DASH.loaded) await loadDashboard();
+    });
+
+    tr.querySelector(".btn-del").addEventListener("click", async () => {
+      if (!confirm(`¿Eliminar el gasto de ${gmoney(g.amount)}${g.description ? ` (${g.description})` : ""}?\n\nQueda registrado en el rastro de auditoría.`)) return;
+      const { error } = await sb.from("expenses").delete().eq("id", g.id);
+      if (error) { alert(`No se pudo eliminar: ${error.message}`); return; }
+      await cargarGastos();
+      if (DASH.loaded) await loadDashboard();
+    });
+    body.appendChild(tr);
+  });
+}
+
+$("btn-ng-add").addEventListener("click", async () => {
+  const msg = $("ng-msg");
+  const monto = parseFloat($("ng-amount").value);
+  if (!(monto > 0)) { msg.textContent = "Pon un monto mayor a cero."; return; }
+  const destino = gasTargetId();
+  if (!destino) { msg.textContent = "No hay una tienda seleccionada."; return; }
+  if (!navigator.onLine) { msg.textContent = "Sin conexión: registrar un gasto necesita internet."; return; }
+
+  const btn = $("btn-ng-add"); btn.disabled = true;
+  // created_by NO se manda: lo pone el servidor con quien está dentro, para
+  // que nadie pueda firmar un gasto a nombre de otra persona.
+  const { error } = await sb.from("expenses").insert({
+    location_id: destino,
+    spent_on: $("ng-date").value || localDateStr(),
+    category: $("ng-cat").value,
+    description: $("ng-desc").value.trim() || null,
+    amount: monto,
+  });
+  btn.disabled = false;
+  if (error) { msg.textContent = `No se pudo registrar: ${error.message}`; return; }
+  msg.textContent = "Gasto registrado.";
+  $("ng-desc").value = ""; $("ng-amount").value = "";
+  await cargarGastos();
+  if (DASH.loaded) await loadDashboard();
+  setTimeout(() => (msg.textContent = ""), 2500);
+});
 
 /* ===========================================================================
    16. INSTALACION EN EL DISPOSITIVO (service worker)

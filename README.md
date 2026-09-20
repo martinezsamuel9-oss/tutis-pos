@@ -45,6 +45,8 @@ computadoras de las tiendas: se abre en el navegador.
    de peso). **Run**.
 6. Nueva consulta, ahora con `sql/05_endurecimiento.sql` (validaciones de
    seguridad y el rastro de auditoría). **Run**.
+7. Nueva consulta, ahora con `sql/06_ventas_por_hora.sql` (la gráfica de horas
+   pico). **Run**.
 
 ### Paso 3 — Crear tu usuario y volverte propietario
 
@@ -122,7 +124,9 @@ entrar. Muestra, del periodo que elijas:
 - **Proyección a fin de mes.** Es el promedio diario por los días del mes, y
   así lo dice en pantalla. Con menos de dos semanas de datos te avisa que no
   te fíes todavía.
-- **Gastos** por categoría, con el formulario para registrarlos.
+- **Siete gráficas**: a dónde va cada lempira, ingresos contra gastos,
+  ventas por día de la semana, ventas por hora, toppings más vendidos,
+  margen del día, y gastos por categoría.
 
 Los filtros son por tienda (cada una o las dos juntas) y por periodo: hoy,
 ayer, esta semana, la pasada, este mes, el pasado, 30 días, 90 días, o el rango
@@ -151,6 +155,18 @@ Las dos se configuran por tienda, en **Configuración**:
   Si cambias la unidad a media venta, las líneas de topping que ya estaban en
   pantalla conservan la suya — reinterpretar un "30" de gramos a onzas
   multiplicaría el cobro por 28.
+
+## Gastos
+
+Pestaña propia. Ahí registras, corriges y borras gastos, y los ves filtrados
+por tienda, por periodo y por categoría. El resumen te dice el total, el
+promedio diario, la proyección al mes y cuál categoría se está llevando más.
+
+Dos gráficas: **en qué se va el dinero** (por categoría) y **cuándo se gasta**
+(por día — la renta y la planilla se ven como picos).
+
+Todo cambio a un gasto queda en el rastro de auditoría, y quién lo registró lo
+pone el servidor, no la pantalla: nadie puede firmar un gasto a nombre de otro.
 
 ## Rastro de auditoría
 
@@ -261,6 +277,7 @@ tutis-web/
     03_dashboard.sql  Gastos y los cálculos del tablero
     04_logo_y_unidades.sql  Logo de la empresa y unidad de peso
     05_endurecimiento.sql   Validaciones de seguridad y rastro de auditoría
+    06_ventas_por_hora.sql  Ventas por hora, para la gráfica de horas pico
     pruebas/          Pruebas de aislamiento en un PostgreSQL local
   web/                <- esta carpeta es la que se publica
     index.html        La aplicación
