@@ -1,0 +1,13 @@
+{
+  "name": "tutis-pos",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Punto de venta multi-sucursal de Tuti's Frozen Yogurt",
+  "scripts": {
+    "dev": "wrangler dev --port 8788",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.135.0"
+  }
+}

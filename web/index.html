@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tuti's — Punto de venta</title>
+<link rel="icon" href="logo.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#C97A25">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Tuti's POS">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- ======================= PANTALLA DE INGRESO ======================= -->
+<div class="login-wrap" id="login-screen">
+  <form class="login-box" id="login-form">
+    <img src="logo.png" alt="Tuti's">
+    <div class="sub">Punto de venta</div>
+    <div class="field stack">
+      <label for="login-email">Correo</label>
+      <input type="email" id="login-email" autocomplete="username" required>
+    </div>
+    <div class="field stack">
+      <label for="login-password">Contraseña</label>
+      <input type="password" id="login-password" autocomplete="current-password" required>
+    </div>
+    <button class="btn primary block big" type="submit" id="login-btn">Entrar</button>
+    <p class="alert bad" id="login-error" hidden></p>
+    <p class="hint" style="margin-top:14px;" id="login-config-warning" hidden>
+      Falta configurar la conexión con Supabase en el archivo <strong>config.js</strong>.
+    </p>
+  </form>
+</div>
+
+<!-- ======================= APLICACIÓN ======================= -->
+<div id="app" hidden>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">
+        <img class="brand-logo" src="logo.png" alt="Tuti's">
+        <span class="brand-tag" id="location-tag">—</span>
+      </div>
+      <div class="top-right">
+        <div class="badge" id="conn-badge"><span class="dot"></span><span id="conn-text">En línea</span></div>
+        <div class="badge" id="user-badge">—</div>
+        <button class="icon-round" id="theme-toggle" type="button" title="Cambiar tema" aria-label="Cambiar entre modo día y modo noche"></button>
+        <button class="btn ghost" id="btn-logout" type="button">Salir</button>
+      </div>
+    </div>
+    <div class="topbar-inner" style="padding-top:0;">
+      <nav class="tabs" id="tabs">
+        <button class="tab-btn active" data-tab="venta">Venta</button>
+        <button class="tab-btn" data-tab="inventario" data-min-role="gerente">Inventario</button>
+        <button class="tab-btn" data-tab="toppings" data-min-role="gerente">Toppings</button>
+        <button class="tab-btn" data-tab="reportes" data-min-role="gerente">Reportes</button>
+        <button class="tab-btn" data-tab="config" data-min-role="gerente">Configuración</button>
+        <button class="tab-btn" data-tab="admin" data-min-role="propietario">Sucursales y usuarios</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="app-shell">
+
+    <!-- ===================== VENTA ===================== -->
+    <section id="tab-venta" class="tab-panel active">
+      <div class="grid-2">
+        <div>
+          <div class="card">
+            <h2>Vaso, cuchara y helado</h2>
+            <div class="sub">Pesa lo que vayas sirviendo — en gramos u onzas.</div>
+
+            <div class="field"><label>Vaso</label><select id="sel-cup"></select></div>
+            <div class="field">
+              <label>Peso del vaso (pésalo vacío)</label>
+              <input type="number" id="inp-cup-weight" min="0" step="0.1" placeholder="0">
+              <div class="unit-seg" id="unit-cup"><button class="active" data-unit="g">g</button><button data-unit="oz">oz</button></div>
+            </div>
+            <div class="field">
+              <label class="check"><input type="checkbox" id="chk-spoon" checked> Incluir cuchara</label>
+              <select id="sel-spoon"></select>
+            </div>
+            <div class="field"><label>Sabor de helado</label><select id="sel-flavor"></select></div>
+            <div class="field">
+              <label>Peso del helado</label>
+              <input type="number" id="inp-ice-weight" min="0" step="0.1" placeholder="0">
+              <div class="unit-seg" id="unit-ice"><button class="active" data-unit="g">g</button><button data-unit="oz">oz</button></div>
+              <button class="btn ghost no-print" id="btn-scale-ice" type="button" title="Leer de la báscula">⚖</button>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Toppings</h2>
+            <div class="sub">Los toppings premium cuestan más por gramo y llevan un recargo para proteger el margen.</div>
+            <div class="chip-grid" id="topping-chips"></div>
+            <div id="order-rows"></div>
+
+            <div class="field" style="margin-top:12px; padding-top:12px; border-top:1px dashed var(--border);">
+              <label>Peso total (báscula)</label>
+              <input type="number" id="inp-total-weight" min="0" step="0.1" placeholder="0">
+              <div class="unit-seg" id="unit-total"><button class="active" data-unit="g">g</button><button data-unit="oz">oz</button></div>
+              <button class="btn ghost no-print" id="btn-scale-total" type="button" title="Leer de la báscula">⚖</button>
+            </div>
+            <p class="hint">Si pesas el vaso ya terminado de una sola vez, ponlo aquí — el sistema calcula el peso de los toppings (peso total − peso de helado − tara) y te avisa si no cuadra con lo que registraste por topping.</p>
+            <p class="hint no-print" id="scale-status" style="margin-top:8px;"></p>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <h2>Ticket</h2>
+            <div class="sub" id="price-per-gram-hint"></div>
+            <div class="ticket" id="ticket-lines"></div>
+            <div class="ticket-totals" id="ticket-totals"></div>
+            <div id="ticket-alerts" style="margin-top:10px;"></div>
+
+            <details open style="margin-top:12px;">
+              <summary style="cursor:pointer; font-weight:700; font-size:0.9rem;">Datos de venta</summary>
+              <div class="field stack" style="margin-top:10px;"><label>Cliente</label><input type="text" id="inp-customer-name" placeholder="Consumidor final"></div>
+              <div class="field stack"><label>NIT / DUI / RTN</label><input type="text" id="inp-customer-taxid"></div>
+              <div class="field stack"><label>Pago</label>
+                <select id="sel-payment">
+                  <option value="efectivo">Efectivo</option>
+                  <option value="tarjeta">Tarjeta</option>
+                  <option value="transferencia">Transferencia</option>
+                </select>
+              </div>
+            </details>
+
+            <button class="btn accent block big" id="btn-charge" style="margin-top:14px;">Cobrar y registrar venta</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== INVENTARIO ===================== -->
+    <section id="tab-inventario" class="tab-panel">
+      <div class="card">
+        <h2>Sabores de helado</h2>
+        <div class="sub">Costo por gramo y existencias. Las filas en rojo están en o bajo el stock mínimo.</div>
+        <div class="table-wrap"><table class="data" id="table-flavors">
+          <thead><tr><th>Sabor</th><th>Costo/g</th><th>Stock (g)</th><th>Mínimo (g)</th><th></th></tr></thead><tbody></tbody>
+        </table></div>
+        <div class="field stack" style="margin-top:14px;"><label>Agregar sabor</label><input id="nf-name" placeholder="Nombre del sabor"></div>
+        <div class="field"><label>Costo por gramo</label><input id="nf-cost" type="number" step="0.001"></div>
+        <div class="field"><label>Stock inicial (g)</label><input id="nf-stock" type="number"></div>
+        <button class="btn primary" id="btn-add-flavor">Agregar sabor</button>
+      </div>
+
+      <div class="card">
+        <h2>Vasos y cucharas</h2>
+        <div class="sub">La tara del vaso es el peso de referencia; en la venta se puede pesar el vaso real.</div>
+        <div class="table-wrap"><table class="data" id="table-supplies">
+          <thead><tr><th>Insumo</th><th>Tipo</th><th>Tara (g)</th><th>Costo c/u</th><th>Stock</th><th>Mínimo</th><th></th></tr></thead><tbody></tbody>
+        </table></div>
+        <div class="field stack" style="margin-top:14px;"><label>Agregar insumo</label><input id="ns-name" placeholder="Ej. Vaso 20oz"></div>
+        <div class="field"><label>Tipo</label><select id="ns-kind"><option value="vaso">Vaso</option><option value="cuchara">Cuchara</option></select></div>
+        <div class="field"><label>Tara (g)</label><input id="ns-tare" type="number" step="0.1"></div>
+        <div class="field"><label>Costo c/u</label><input id="ns-cost" type="number" step="0.01"></div>
+        <div class="field"><label>Stock inicial</label><input id="ns-stock" type="number"></div>
+        <button class="btn primary" id="btn-add-supply">Agregar insumo</button>
+      </div>
+    </section>
+
+    <!-- ===================== TOPPINGS ===================== -->
+    <section id="tab-toppings" class="tab-panel">
+      <div class="card">
+        <h2>Parametrización de toppings</h2>
+        <div class="sub">
+          Tier 1 entra dentro del precio único por gramo. Tier 2 es premium: cobra un recargo
+          adicional por gramo para que ese topping no se coma el margen.
+        </div>
+        <div class="table-wrap"><table class="data" id="table-toppings">
+          <thead><tr><th>Topping</th><th>Categoría</th><th>Costo/g</th><th>Tier</th><th>Recargo/g</th><th>Stock (g)</th><th>Mínimo</th><th></th></tr></thead><tbody></tbody>
+        </table></div>
+        <p class="hint" id="tier-suggestion" style="margin-top:10px;"></p>
+        <button class="btn ghost" id="btn-suggest-tiers" style="margin-top:10px;">Sugerir tier y recargo para todos</button>
+      </div>
+      <div class="card">
+        <h2>Agregar topping</h2>
+        <div class="field stack"><label>Nombre</label><input id="nt-name"></div>
+        <div class="field"><label>Categoría</label><select id="nt-cat">
+          <option value="dulce">Dulce</option><option value="mani">Maní / nueces</option>
+          <option value="salsa">Salsa</option><option value="jalea">Jalea</option><option value="fruta">Fruta</option>
+        </select></div>
+        <div class="field"><label>Costo por gramo</label><input id="nt-cost" type="number" step="0.001"></div>
+        <div class="field"><label>Stock inicial (g)</label><input id="nt-stock" type="number"></div>
+        <button class="btn primary" id="btn-add-topping">Agregar topping</button>
+      </div>
+    </section>
+
+    <!-- ===================== REPORTES ===================== -->
+    <section id="tab-reportes" class="tab-panel">
+      <div class="card no-print" id="owner-location-picker" hidden>
+        <h2>Sucursal</h2>
+        <div class="sub">Como propietario puedes ver cualquier tienda, o todas juntas.</div>
+        <div class="field"><label>Ver</label><select id="sel-report-location"></select></div>
+      </div>
+
+      <div class="card">
+        <h2>Resumen</h2>
+        <div class="kpi-grid" id="report-summary"></div>
+      </div>
+
+      <div class="card closing-card">
+        <h2>Cierre del día</h2>
+        <div class="closing-print-head" id="closing-print-head"></div>
+        <div class="field no-print"><label>Fecha</label><input type="date" id="closing-date"></div>
+        <div class="kpi-grid" id="closing-summary"></div>
+        <div class="sub" style="margin-top:14px;">Toppings vendidos ese día, con su % sobre el total de peso de toppings.</div>
+        <div class="table-wrap"><table class="data" id="table-closing-toppings">
+          <thead><tr><th>Topping</th><th>Peso vendido</th><th>% del total</th></tr></thead><tbody></tbody>
+        </table></div>
+        <div class="modal-actions no-print">
+          <button class="btn ghost" id="btn-print-closing" type="button">Imprimir cierre</button>
+          <button class="btn primary" id="btn-email-closing" type="button">Enviar por correo</button>
+        </div>
+        <p class="hint no-print" id="closing-email-hint"></p>
+      </div>
+
+      <div class="card">
+        <h2>Costo-beneficio por topping</h2>
+        <div class="sub">De menor a mayor margen acumulado — para decidir a qué toppings subirles el recargo.</div>
+        <div class="table-wrap"><table class="data" id="table-margins">
+          <thead><tr><th>Topping</th><th>Peso vendido</th><th>Costo</th><th>Precio</th><th>Margen</th><th>Margen %</th></tr></thead><tbody></tbody>
+        </table></div>
+      </div>
+
+      <div class="card">
+        <h2>Últimas ventas</h2>
+        <div class="table-wrap"><table class="data" id="table-sales">
+          <thead><tr><th>Fecha</th><th>Sucursal</th><th>Cajera</th><th>Peso</th><th>Total</th><th>Margen</th></tr></thead><tbody></tbody>
+        </table></div>
+      </div>
+    </section>
+
+    <!-- ===================== CONFIGURACIÓN ===================== -->
+    <section id="tab-config" class="tab-panel">
+      <div class="card">
+        <h2>Datos de la sucursal</h2>
+        <div class="sub" id="config-location-name"></div>
+        <div class="field stack"><label>Nombre comercial</label><input id="cfg-name"></div>
+        <div class="field stack"><label>Razón social</label><input id="cfg-legal-name"></div>
+        <div class="field"><label>País</label>
+          <select id="cfg-country"><option value="GT">Guatemala</option><option value="SV">El Salvador</option><option value="HN">Honduras</option></select>
+        </div>
+        <div class="field"><label>Moneda</label><input id="cfg-currency" placeholder="GTQ, USD, HNL…"></div>
+        <div class="field"><label id="cfg-taxid-label">NIT</label><input id="cfg-taxid"></div>
+        <div class="field stack"><label>Dirección</label><input id="cfg-address"></div>
+
+        <h2 style="margin-top:18px;">Precio y márgenes</h2>
+        <div class="field"><label>Precio único por gramo</label><input id="cfg-price-gram" type="number" step="0.001"></div>
+        <p class="hint" id="cfg-price-oz-hint"></p>
+        <div class="field"><label class="check"><input type="checkbox" id="cfg-include-cup"> Cobrar también el peso del vaso</label></div>
+        <div class="field"><label>Margen mínimo deseado (%)</label><input id="cfg-margin-target" type="number" step="1"></div>
+
+        <h2 style="margin-top:18px;">Reporte de cierre</h2>
+        <div class="field stack"><label>Correo para enviar el cierre del día</label><input id="cfg-report-email" type="email" placeholder="correo@ejemplo.com"></div>
+
+        <h2 style="margin-top:18px;">Facturación</h2>
+        <p class="hint" id="cfg-invoice-status"></p>
+
+        <button class="btn primary" id="btn-save-config" style="margin-top:14px;">Guardar configuración</button>
+        <p class="hint" id="config-saved"></p>
+      </div>
+    </section>
+
+    <!-- ===================== SUCURSALES Y USUARIOS (solo propietario) ===================== -->
+    <section id="tab-admin" class="tab-panel">
+      <div class="card">
+        <h2>Sucursales</h2>
+        <div class="sub">Abrir una sucursal nueva es agregar una fila aquí. Cada una arranca con su propio inventario vacío.</div>
+        <div class="table-wrap"><table class="data" id="table-locations">
+          <thead><tr><th>Sucursal</th><th>País</th><th>Moneda</th><th>Precio/g</th><th>Activa</th><th></th></tr></thead><tbody></tbody>
+        </table></div>
+        <div class="field stack" style="margin-top:14px;"><label>Nombre de la nueva sucursal</label><input id="nl-name" placeholder="Ej. Tuti's City Mall"></div>
+        <div class="field"><label>País</label><select id="nl-country">
+          <option value="HN">Honduras</option><option value="GT">Guatemala</option><option value="SV">El Salvador</option>
+        </select></div>
+        <div class="field"><label>Moneda</label><input id="nl-currency" placeholder="HNL"></div>
+        <div class="field"><label>Precio por gramo</label><input id="nl-price" type="number" step="0.001"></div>
+        <button class="btn primary" id="btn-add-location">Crear sucursal</button>
+        <p class="hint" id="new-location-msg"></p>
+      </div>
+
+      <div class="card">
+        <h2>Personal</h2>
+        <div class="sub">
+          Primero crea a la persona en Supabase → Authentication → Users (o que se registre).
+          Aquí le asignas su rol y su tienda. Una cajera o gerente solo verá la sucursal que le pongas.
+        </div>
+        <div class="table-wrap"><table class="data" id="table-profiles">
+          <thead><tr><th>Nombre</th><th>Rol</th><th>Sucursal</th><th>Activo</th><th></th></tr></thead><tbody></tbody>
+        </table></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ======================= RECIBO ======================= -->
+<div class="modal-overlay" id="receipt-modal" hidden>
+  <div class="modal-box">
+    <div id="receipt-body"></div>
+    <div class="modal-actions no-print">
+      <button class="btn ghost" id="btn-close-receipt">Cerrar</button>
+      <button class="btn primary" id="btn-print-receipt" type="button">Imprimir</button>
+    </div>
+  </div>
+</div>
+
+<script src="config.js"></script>
+<!-- El SDK de Supabase va servido desde aquí mismo, no desde un CDN externo.
+     Dos razones: la tienda puede abrir la aplicacion sin internet (el service
+     worker no puede guardar lo que sirve otro dominio), y nadie de fuera puede
+     cambiar el codigo que corre en la caja. -->
+<script src="vendor/supabase.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

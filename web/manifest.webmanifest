@@ -1,0 +1,16 @@
+{
+  "name": "Tuti's — Punto de venta",
+  "short_name": "Tuti's POS",
+  "description": "Punto de venta de Tuti's Frozen Yogurt. Cobra aunque no haya internet.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#F4F7F6",
+  "theme_color": "#C97A25",
+  "lang": "es",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}

@@ -1,0 +1,12 @@
+# Dependencias de desarrollo (wrangler). Se reinstalan con:  npm install
+node_modules/
+package-lock.json
+
+# Estado local de wrangler
+.wrangler/
+
+# Sistema
+.DS_Store
+
+# Ajustes locales de Claude Code
+.claude/settings.local.json

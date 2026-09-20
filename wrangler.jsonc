@@ -1,0 +1,31 @@
+{
+  // ==========================================================================
+  //  Publicacion del punto de venta en Cloudflare.
+  //
+  //  Es un sitio estatico servido por un Worker: no hay codigo de servidor
+  //  ("main" no existe a proposito), solo los archivos de la carpeta web/.
+  //
+  //  Publicar:  npx wrangler deploy
+  //  Ver logs:  npx wrangler deployments list
+  // ==========================================================================
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "tutis-pos",
+  "compatibility_date": "2026-09-19",
+
+  "assets": {
+    "directory": "./web"
+  },
+
+  // Cloudflare crea solo el registro DNS de este subdominio al publicar.
+  // Requiere que slabblu.com ya sea una zona activa en esta misma cuenta.
+  "routes": [
+    {
+      "pattern": "tutis.slabblu.com",
+      "custom_domain": true
+    }
+  ],
+
+  "observability": {
+    "enabled": true
+  }
+}

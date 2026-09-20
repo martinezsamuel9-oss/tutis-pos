@@ -1,0 +1,31 @@
+# ============================================================================
+#  Cabeceras de seguridad — las aplica Cloudflare a cada archivo que sirve.
+#  Este archivo NO se publica como parte del sitio; Cloudflare lo lee y lo
+#  convierte en reglas.
+# ============================================================================
+
+/*
+  # El navegador ejecuta SOLO scripts de este mismo sitio. Por eso el SDK de
+  # Supabase va en vendor/ y no en un CDN: si mañana alguien intervieniera un
+  # CDN, ese codigo correria dentro de la caja. Tambien por eso la aplicacion
+  # ya no tiene scripts escritos dentro del HTML.
+  # connect-src deja hablar solo con Supabase; los estilos en linea del HTML
+  # obligan a 'unsafe-inline' en style-src, que es mucho menos peligroso que
+  # en script-src.
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' https://*.supabase.co wss://*.supabase.co; form-action 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; manifest-src 'self'; worker-src 'self'
+  # Nadie puede meter la caja dentro de un iframe suyo para engañar a la cajera.
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  # OJO: aqui NO se restringe "serial". La bascula se lee por Web Serial y
+  # bloquearlo dejaria sin funcionar el boton de pesar.
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), interest-cohort=()
+  Cross-Origin-Opener-Policy: same-origin
+  X-Robots-Tag: noindex, nofollow
+
+# La configuracion y el service worker nunca se guardan en cache del navegador:
+# si cambian las credenciales o se publica una version nueva, tiene que llegar.
+/config.js
+  Cache-Control: no-cache, must-revalidate
+/sw.js
+  Cache-Control: no-cache, must-revalidate
