@@ -341,6 +341,7 @@ async function startSession() {
   await loadData();
   await syncPending();
   updateConnBadge();
+  if (canManage()) await loadDashboard();
 }
 
 function showLogin() {
@@ -357,6 +358,12 @@ function applyRoleVisibility() {
   });
   $("user-badge").textContent = `${STATE.profile.full_name || "Usuario"} · ${STATE.profile.role}`;
   $("owner-location-picker").hidden = !isOwner();
+
+  // La cajera abre directo en Venta, que es lo único que le toca. Gerente y
+  // propietario abren en el tablero: es la pantalla de "cómo va el negocio".
+  const inicio = canManage() ? "dashboard" : "venta";
+  document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === inicio));
+  document.querySelectorAll(".tab-panel").forEach((pnl) => pnl.classList.toggle("active", pnl.id === "tab-" + inicio));
 }
 
 /* ===========================================================================
@@ -438,7 +445,9 @@ function renderAll() {
     renderClosing();
     fillConfigForm();
   }
+  if (canManage()) fillDashLocationPicker();
   if (isOwner()) { fillReportLocationPicker(); renderAdmin(); }
+  if (DASH.loaded) renderDashboard();
 }
 
 /* ===========================================================================
@@ -450,6 +459,9 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
     btn.classList.add("active");
     $("tab-" + btn.dataset.tab).classList.add("active");
+    // El tablero pide números al servidor, así que no se carga hasta que
+    // alguien lo abre. Después se refresca solo al cambiar los filtros.
+    if (btn.dataset.tab === "dashboard" && !DASH.loaded) loadDashboard();
   });
 });
 
@@ -1199,6 +1211,8 @@ function renderAdmin() {
     locBody.appendChild(tr);
   });
 
+  fillNewUserLocationPicker();
+
   const pBody = document.querySelector("#table-profiles tbody");
   pBody.innerHTML = "";
   STATE.profiles.forEach((p) => {
@@ -1233,6 +1247,89 @@ function renderAdmin() {
     pBody.appendChild(tr);
   });
 }
+
+function fillNewUserLocationPicker() {
+  const sel = $("nu-location");
+  const keep = sel.value;
+  sel.innerHTML = '<option value="">— (todas: solo para propietario) —</option>';
+  STATE.locations.forEach((l) => {
+    const o = document.createElement("option");
+    o.value = l.id; o.textContent = l.name; sel.appendChild(o);
+  });
+  sel.value = keep || STATE.activeLocationId || "";
+}
+
+// Crear la cuenta con el cliente normal metería a la persona recién creada en
+// la sesión del navegador y sacaría al propietario de la suya. Por eso se usa
+// un cliente aparte que no guarda sesión: crea el usuario y se olvida de él.
+let sbSignup = null;
+function signupClient() {
+  if (!sbSignup) {
+    sbSignup = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    });
+  }
+  return sbSignup;
+}
+
+$("btn-add-user").addEventListener("click", async () => {
+  const msg = $("nu-msg");
+  const nombre = $("nu-name").value.trim();
+  const correo = $("nu-email").value.trim().toLowerCase();
+  const clave  = $("nu-password").value;
+  const rol    = $("nu-role").value;
+  const locId  = $("nu-location").value || null;
+
+  if (!nombre) { msg.textContent = "Ponle el nombre completo."; return; }
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(correo)) { msg.textContent = "Ese correo no se ve válido."; return; }
+  if (clave.length < 6) { msg.textContent = "La contraseña temporal debe tener al menos 6 caracteres."; return; }
+  // La misma regla que impone la base: quien no es propietario necesita tienda.
+  if (rol !== "propietario" && !locId) { msg.textContent = "Una cajera o gerente necesita una sucursal asignada."; return; }
+  if (!navigator.onLine) { msg.textContent = "Sin conexión: dar de alta a alguien necesita internet."; return; }
+
+  const btn = $("btn-add-user");
+  btn.disabled = true; msg.textContent = "Creando…";
+  try {
+    const { data, error } = await signupClient().auth.signUp({
+      email: correo, password: clave, options: { data: { full_name: nombre } },
+    });
+    if (error) throw error;
+
+    // Cuando el correo ya existe, el servidor no lo dice de frente (para que
+    // nadie pueda averiguar qué correos están registrados): devuelve un
+    // usuario sin identidades. Eso es lo que revisamos aquí.
+    if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      msg.textContent = "Ya existe un usuario con ese correo. Búscalo en la tabla de arriba para cambiarle el rol o la tienda.";
+      return;
+    }
+    if (!data.user) throw new Error("El servidor no devolvió el usuario.");
+
+    // El perfil lo crea la base sola al nacer el usuario (como cajera sin
+    // tienda). Aquí el propietario le pone su rol y su sucursal de verdad.
+    const { error: perr } = await sb.from("profiles").upsert({
+      id: data.user.id, full_name: nombre, role: rol,
+      location_id: rol === "propietario" ? null : locId, active: true,
+    });
+    if (perr) throw perr;
+
+    const tienda = STATE.locations.find((l) => l.id === locId);
+    msg.textContent = `Listo: ${nombre} ya puede entrar como ${rol}` +
+      (tienda ? ` en ${tienda.name}` : "") +
+      `. Dale su correo y la contraseña temporal.` +
+      (data.session ? "" : " Si al entrar le pide confirmar el correo, avísale a soporte técnico.");
+    ["nu-name", "nu-email", "nu-password"].forEach((id) => ($(id).value = ""));
+    await loadData();
+  } catch (ex) {
+    const m = ex.message || String(ex);
+    msg.textContent = /Password should be/i.test(m)
+      ? "La contraseña es muy corta o muy débil para las reglas del servidor."
+      : /signups? not allowed|disabled/i.test(m)
+      ? "El servidor no está aceptando altas nuevas. Avísale a soporte técnico."
+      : `No se pudo crear: ${m}`;
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 $("btn-add-location").addEventListener("click", async () => {
   const name = $("nl-name").value.trim();
@@ -1341,8 +1438,489 @@ if (!scaleSupported()) {
   $("btn-scale-total").hidden = true;
 }
 
+
 /* ===========================================================================
-   15. INSTALACION EN EL DISPOSITIVO (service worker)
+   15. DASHBOARD
+   ---------------------------------------------------------------------------
+   Los números salen de dashboard_summary(), una función de la base que ya
+   trae todo agregado de un periodo. Se llama una vez por sucursal y aquí se
+   suman: así el propietario ve cada tienda por separado y las dos juntas, y
+   la base sigue siendo la que decide quién puede ver qué.
+
+   Las gráficas son SVG dibujado a mano. No hay librería de gráficas a
+   propósito: la política de seguridad del sitio no permite cargar código de
+   otro dominio, y para barras y una línea de promedio no hace falta.
+   =========================================================================== */
+const DASH = { results: [], expenses: [], from: null, to: null, loaded: false };
+
+const EXPENSE_LABELS = {
+  renta: "Renta", planilla: "Planilla", insumos: "Insumos",
+  servicios: "Servicios", mantenimiento: "Mantenimiento",
+  mercadeo: "Mercadeo", impuestos: "Impuestos", otros: "Otros",
+};
+
+function addDays(d, n) { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+function startOfWeek(d) { const x = new Date(d); const w = (x.getDay() + 6) % 7; return addDays(x, -w); }
+function startOfMonth(d) { return new Date(d.getFullYear(), d.getMonth(), 1); }
+function endOfMonth(d) { return new Date(d.getFullYear(), d.getMonth() + 1, 0); }
+
+// Traduce el selector de periodo a un par de fechas locales. Todo en fecha
+// local de la tienda, nunca UTC: en UTC-6 las ventas de la tarde caerían en
+// el día equivocado.
+function dashRange() {
+  const hoy = new Date();
+  const v = $("dash-range").value;
+  switch (v) {
+    case "hoy":           return { from: hoy, to: hoy };
+    case "ayer":          return { from: addDays(hoy, -1), to: addDays(hoy, -1) };
+    case "semana":        return { from: startOfWeek(hoy), to: hoy };
+    case "semana_pasada": { const i = addDays(startOfWeek(hoy), -7); return { from: i, to: addDays(i, 6) }; }
+    case "mes":           return { from: startOfMonth(hoy), to: hoy };
+    case "mes_pasado":    { const i = startOfMonth(addDays(startOfMonth(hoy), -1)); return { from: i, to: endOfMonth(i) }; }
+    case "30d":           return { from: addDays(hoy, -29), to: hoy };
+    case "90d":           return { from: addDays(hoy, -89), to: hoy };
+    default: {
+      const f = $("dash-from").value, t = $("dash-to").value;
+      return { from: f ? new Date(f + "T12:00:00") : addDays(hoy, -6),
+               to:   t ? new Date(t + "T12:00:00") : hoy };
+    }
+  }
+}
+
+function dashScopeIds() {
+  if (!isOwner()) return [STATE.profile.location_id];
+  const v = $("dash-location").value;
+  return v === "__all__" ? STATE.locations.filter((l) => l.active).map((l) => l.id) : [v];
+}
+
+// La moneda del tablero es la de la tienda que se está viendo. En el
+// consolidado se usa la de la primera, y si hay monedas distintas el aviso de
+// arriba ya advierte que esos totales no son comparables.
+function dashCurrency() {
+  const ids = dashScopeIds();
+  const loc = STATE.locations.find((l) => l.id === ids[0]);
+  return (loc && loc.currency_code) || "";
+}
+function dmoney(v) { return `${dashCurrency()} ${(Number(v) || 0).toFixed(2)}`; }
+
+function fillDashLocationPicker() {
+  const sel = $("dash-location");
+  const keep = sel.value;
+  sel.innerHTML = "";
+  if (isOwner()) {
+    sel.innerHTML = '<option value="__all__">Todas las tiendas (consolidado)</option>';
+    STATE.locations.forEach((l) => {
+      const o = document.createElement("option");
+      o.value = l.id; o.textContent = l.name; sel.appendChild(o);
+    });
+    sel.value = keep || "__all__";
+  } else {
+    const loc = activeLocation();
+    const o = document.createElement("option");
+    o.value = STATE.profile.location_id;
+    o.textContent = loc ? loc.name : "Mi tienda";
+    sel.appendChild(o);
+  }
+  sel.disabled = !isOwner();
+}
+
+$("dash-range").addEventListener("change", () => {
+  const custom = $("dash-range").value === "personalizado";
+  $("dash-custom-from").hidden = !custom;
+  $("dash-custom-to").hidden = !custom;
+  if (!custom) loadDashboard();
+});
+$("dash-location").addEventListener("change", loadDashboard);
+$("btn-dash-refresh").addEventListener("click", loadDashboard);
+["dash-from", "dash-to"].forEach((id) => $(id).addEventListener("change", () => {
+  if ($("dash-range").value === "personalizado") loadDashboard();
+}));
+
+async function loadDashboard() {
+  if (!canManage()) return;
+  const warn = $("dash-warnings");
+  if (!navigator.onLine) {
+    warn.innerHTML = '<div class="alert warn">Sin conexión: el tablero necesita internet porque los números se calculan en el servidor. La pantalla de venta sí sigue funcionando.</div>';
+    return;
+  }
+  const { from, to } = dashRange();
+  if (from > to) {
+    warn.innerHTML = '<div class="alert bad">La fecha "desde" es posterior a la fecha "hasta".</div>';
+    return;
+  }
+  DASH.from = localDateStr(from);
+  DASH.to = localDateStr(to);
+  warn.innerHTML = '<p class="hint">Calculando…</p>';
+
+  const ids = dashScopeIds().filter(Boolean);
+  const results = [];
+  for (const locId of ids) {
+    const { data, error } = await sb.rpc("dashboard_summary", {
+      p_location_id: locId, p_from: DASH.from, p_to: DASH.to,
+      p_utc_offset_hours: CFG.UTC_OFFSET_HOURS ?? -6,
+    });
+    if (error) {
+      warn.innerHTML = `<div class="alert bad">No se pudo cargar el tablero: ${esc(error.message)}</div>`;
+      return;
+    }
+    results.push({ ...data, locationName: (STATE.locations.find((l) => l.id === locId) || {}).name || "" });
+  }
+  DASH.results = results;
+
+  let q = sb.from("expenses").select("*, locations(name)")
+            .gte("spent_on", DASH.from).lte("spent_on", DASH.to)
+            .order("spent_on", { ascending: false }).limit(200);
+  if (ids.length === 1) q = q.eq("location_id", ids[0]);
+  const { data: gastos } = await q;
+  DASH.expenses = gastos || [];
+
+  DASH.loaded = true;
+  renderDashboard();
+}
+
+function dashTotals() {
+  return DASH.results.reduce((a, c) => ({
+    ventas:   a.ventas   + Number(c.ventas || 0),
+    ingresos: a.ingresos + Number(c.ingresos || 0),
+    costos:   a.costos   + Number(c.costos || 0),
+    margen:   a.margen   + Number(c.margen || 0),
+    gastos:   a.gastos   + Number(c.gastos || 0),
+    utilidad: a.utilidad + Number(c.utilidad || 0),
+    vasos:    a.vasos    + Number(c.vasos || 0),
+    cucharas: a.cucharas + Number(c.cucharas || 0),
+    helado:   a.helado   + Number(c.peso_helado_g || 0),
+    toppings: a.toppings + Number(c.peso_toppings_g || 0),
+  }), { ventas: 0, ingresos: 0, costos: 0, margen: 0, gastos: 0, utilidad: 0,
+        vasos: 0, cucharas: 0, helado: 0, toppings: 0 });
+}
+
+// Suma las series diarias de todas las tiendas del alcance, día por día.
+function dashSerie() {
+  const by = new Map();
+  DASH.results.forEach((r) => (r.serie || []).forEach((d) => {
+    const cur = by.get(d.dia) || { dia: d.dia, ventas: 0, ingresos: 0, costos: 0, margen: 0, gastos: 0 };
+    cur.ventas += Number(d.ventas || 0);
+    cur.ingresos += Number(d.ingresos || 0);
+    cur.costos += Number(d.costos || 0);
+    cur.margen += Number(d.margen || 0);
+    cur.gastos += Number(d.gastos || 0);
+    by.set(d.dia, cur);
+  }));
+  return [...by.values()].sort((a, b) => (a.dia < b.dia ? -1 : 1));
+}
+
+// Cuántos días abarca el periodo pedido. Se calcula del rango, no de lo que
+// devolvió el servidor: así la etiqueta y el promedio diario nunca pueden
+// contradecir al filtro que el usuario está viendo en pantalla.
+function dashDayCount() {
+  if (!DASH.from || !DASH.to) return 0;
+  const a = new Date(DASH.from + "T12:00:00"), b = new Date(DASH.to + "T12:00:00");
+  return Math.round((b - a) / 86400000) + 1;
+}
+
+function dashMixedCurrencyWarning() {
+  const ids = dashScopeIds();
+  if (ids.length <= 1) return "";
+  const monedas = [...new Set(STATE.locations.filter((l) => ids.includes(l.id)).map((l) => l.currency_code))];
+  if (monedas.length <= 1) return "";
+  return `<div class="alert warn">Las tiendas de este consolidado manejan monedas distintas (${esc(monedas.join(", "))}). Los totales en dinero no son comparables; míralas por separado. Los pesos y las cantidades sí se pueden sumar.</div>`;
+}
+
+function renderDashboard() {
+  const t = dashTotals();
+  const serie = dashSerie();
+  const ids = dashScopeIds();
+  const scopeName = ids.length > 1
+    ? "Todas las tiendas"
+    : (STATE.locations.find((l) => l.id === ids[0]) || {}).name || "";
+
+  const fmt = (iso) => { const [y, m, d] = iso.split("-"); return `${d}/${m}/${y}`; };
+  const nDias = dashDayCount();
+  $("dash-range-label").textContent = `Mostrando ${scopeName} — del ${fmt(DASH.from)} al ${fmt(DASH.to)} (${nDias} día${nDias === 1 ? "" : "s"}).`;
+  $("dash-print-head").innerHTML = `<strong>${esc(scopeName)}</strong> — del ${fmt(DASH.from)} al ${fmt(DASH.to)}`;
+  $("dash-warnings").innerHTML = dashMixedCurrencyWarning();
+
+  const margenPct = t.ingresos > 0 ? r2((100 * t.margen) / t.ingresos) : 0;
+  const utilPct   = t.ingresos > 0 ? r2((100 * t.utilidad) / t.ingresos) : 0;
+  const ticket    = t.ventas > 0 ? r2(t.ingresos / t.ventas) : 0;
+  const diaria    = nDias ? r2(t.ingresos / nDias) : 0;
+
+  const kpi = (label, value, sub, cls) =>
+    `<div class="kpi ${cls || ""}"><div class="kpi-label">${label}</div>
+     <div class="kpi-value num">${value}</div>${sub ? `<div class="kpi-sub">${sub}</div>` : ""}</div>`;
+
+  $("dash-kpis").innerHTML =
+    kpi("Ingresos", dmoney(t.ingresos), `${t.ventas} venta${t.ventas === 1 ? "" : "s"}`) +
+    kpi("Costo del producto", dmoney(t.costos)) +
+    kpi("Margen bruto", dmoney(t.margen), `${margenPct}% de los ingresos`) +
+    kpi("Gastos de operación", dmoney(t.gastos)) +
+    // La utilidad es el único número que dice si la tienda gana: margen del
+    // producto menos lo que cuesta tener la tienda abierta.
+    kpi("Utilidad", dmoney(t.utilidad), `${utilPct}% de los ingresos`,
+        t.utilidad >= 0 ? "good" : "bad") +
+    kpi("Ticket promedio", dmoney(ticket)) +
+    kpi("Promedio diario", dmoney(diaria), `sobre ${nDias} día${nDias === 1 ? "" : "s"}`) +
+    kpi("Vasos", t.vasos, `${t.cucharas} cucharas`) +
+    kpi("Helado vendido", `${r2(t.helado)} g`, `${r2(toOz(t.helado))} oz`) +
+    kpi("Toppings vendidos", `${r2(t.toppings)} g`, `${r2(toOz(t.toppings))} oz`);
+
+  renderDashChart(serie);
+  renderDashStores();
+  renderDashProjection(serie, t);
+  renderDashExpenses();
+  renderDashToppings();
+}
+
+/* --- Gráfica de barras en SVG ---------------------------------------------
+   Si el periodo es largo, los días se agrupan por semana: 90 barras en un
+   celular no se leen. */
+function renderDashChart(serie) {
+  const box = $("dash-chart");
+  if (!serie.length || serie.every((d) => !d.ingresos && !d.gastos)) {
+    box.innerHTML = '<div class="chart-empty">No hay movimientos en este periodo.</div>';
+    $("dash-chart-legend").innerHTML = "";
+    return;
+  }
+
+  let puntos = serie, agrupado = false;
+  if (serie.length > 45) {
+    agrupado = true;
+    const by = new Map();
+    serie.forEach((d) => {
+      const k = localDateStr(startOfWeek(new Date(d.dia + "T12:00:00")));
+      const cur = by.get(k) || { dia: k, ingresos: 0, gastos: 0 };
+      cur.ingresos += d.ingresos; cur.gastos += d.gastos;
+      by.set(k, cur);
+    });
+    puntos = [...by.values()].sort((a, b) => (a.dia < b.dia ? -1 : 1));
+  }
+
+  const W = 720, H = 220, padL = 52, padR = 10, padT = 12, padB = 26;
+  const innerW = W - padL - padR, innerH = H - padT - padB;
+  const max = Math.max(...puntos.map((d) => Math.max(d.ingresos, d.gastos)), 1);
+  const slot = innerW / puntos.length;
+  const bw = Math.max(2, Math.min(18, slot / 2 - 1));
+  const y = (v) => padT + innerH - (v / max) * innerH;
+
+  const avg = puntos.reduce((a, d) => a + d.ingresos, 0) / puntos.length;
+  const nice = (v) => v >= 1000 ? (v / 1000).toFixed(1) + "k" : String(Math.round(v));
+
+  let bars = "";
+  puntos.forEach((d, i) => {
+    const x = padL + i * slot + slot / 2;
+    const hi = Math.max(0, padT + innerH - y(d.ingresos));
+    const hg = Math.max(0, padT + innerH - y(d.gastos));
+    const t = `${fechaCorta(d.dia)}${agrupado ? " (semana)" : ""} — ingresos ${dmoney(d.ingresos)}, gastos ${dmoney(d.gastos)}`;
+    bars += `<g><title>${esc(t)}</title>`;
+    bars += `<rect class="chart-bar-income" x="${(x - bw - 0.5).toFixed(1)}" y="${y(d.ingresos).toFixed(1)}" width="${bw.toFixed(1)}" height="${hi.toFixed(1)}" rx="2"/>`;
+    bars += `<rect class="chart-bar-expense" x="${(x + 0.5).toFixed(1)}" y="${y(d.gastos).toFixed(1)}" width="${bw.toFixed(1)}" height="${hg.toFixed(1)}" rx="2"/>`;
+    bars += `</g>`;
+  });
+
+  let ticks = "";
+  for (let k = 0; k <= 4; k++) {
+    const v = (max / 4) * k, yy = y(v);
+    ticks += `<line class="chart-axis" x1="${padL}" y1="${yy.toFixed(1)}" x2="${W - padR}" y2="${yy.toFixed(1)}" opacity="0.35"/>`;
+    ticks += `<text class="chart-label" x="${padL - 6}" y="${(yy + 3).toFixed(1)}" text-anchor="end">${nice(v)}</text>`;
+  }
+
+  const paso = Math.ceil(puntos.length / 8);
+  let labels = "";
+  puntos.forEach((d, i) => {
+    if (i % paso) return;
+    const x = padL + i * slot + slot / 2;
+    labels += `<text class="chart-label" x="${x.toFixed(1)}" y="${H - 8}" text-anchor="middle">${fechaCorta(d.dia)}</text>`;
+  });
+
+  const avgY = y(avg).toFixed(1);
+  box.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" preserveAspectRatio="xMidYMid meet"
+      aria-label="Ingresos y gastos por ${agrupado ? "semana" : "día"}">
+    ${ticks}${bars}
+    <line class="chart-avg-line" x1="${padL}" y1="${avgY}" x2="${W - padR}" y2="${avgY}"/>
+  </svg>`;
+
+  $("dash-chart-legend").innerHTML =
+    `<span><i class="income"></i> Ingresos</span>` +
+    `<span><i class="expense"></i> Gastos</span>` +
+    `<span><i class="avg"></i> Promedio de ingresos: ${dmoney(avg)} por ${agrupado ? "semana" : "día"}</span>`;
+}
+
+function fechaCorta(iso) { const p = iso.split("-"); return `${p[2]}/${p[1]}`; }
+
+/* --- Comparativo por tienda ------------------------------------------------ */
+function renderDashStores() {
+  const card = $("dash-bystore-card");
+  // Con una sola tienda a la vista, la tabla no compara nada.
+  card.hidden = DASH.results.length < 2;
+  const body = document.querySelector("#table-dash-stores tbody");
+  body.innerHTML = "";
+  DASH.results.forEach((r) => {
+    const tr = document.createElement("tr");
+    if (Number(r.utilidad) < 0) tr.classList.add("low-stock");
+    tr.innerHTML = `<td>${esc(r.locationName)}</td>
+      <td class="num">${r.ventas}</td>
+      <td class="num">${dmoney(r.ingresos)}</td>
+      <td class="num">${dmoney(r.costos)}</td>
+      <td class="num">${dmoney(r.margen)} (${r.margen_pct}%)</td>
+      <td class="num">${dmoney(r.gastos)}</td>
+      <td class="num">${dmoney(r.utilidad)}</td>
+      <td class="num">${dmoney(r.ticket_promedio)}</td>`;
+    body.appendChild(tr);
+  });
+}
+
+/* --- Proyección ------------------------------------------------------------
+   Deliberadamente simple y explicada: promedio diario del periodo por los
+   días que faltan del mes. No es un modelo; es una regla de tres. Decirlo es
+   parte de la función: una proyección con 3 días de datos no vale nada, y la
+   pantalla lo tiene que admitir en vez de mostrar un número con autoridad
+   falsa. */
+function renderDashProjection(serie, t) {
+  const box = $("dash-projection"), note = $("dash-projection-note");
+  const conVentas = serie.filter((d) => d.ventas > 0).length;
+
+  if (!conVentas) {
+    box.innerHTML = "";
+    note.textContent = "Todavía no hay ventas en este periodo, así que no hay nada que proyectar.";
+    return;
+  }
+
+  const nDias = Math.max(1, dashDayCount());
+  const promDia = t.ingresos / nDias;
+  const promGasto = t.gastos / nDias;
+
+  const hoy = new Date();
+  const finMes = endOfMonth(hoy).getDate();
+  const diaHoy = hoy.getDate();
+  const faltan = Math.max(0, finMes - diaHoy);
+
+  // Lo que va del mes se pide aparte: el periodo que el usuario eligió puede
+  // no ser el mes en curso (por ejemplo "semana pasada").
+  const proyIngresos = promDia * finMes;
+  const proyGastos   = promGasto * finMes;
+  const proyUtilidad = proyIngresos - (t.ingresos > 0 ? (t.costos / t.ingresos) * proyIngresos : 0) - proyGastos;
+
+  const kpi = (l, v, sub, cls) =>
+    `<div class="kpi ${cls || ""}"><div class="kpi-label">${l}</div>
+     <div class="kpi-value num">${v}</div>${sub ? `<div class="kpi-sub">${sub}</div>` : ""}</div>`;
+
+  box.innerHTML =
+    kpi("Ingresos proyectados del mes", dmoney(proyIngresos), `a este ritmo, ${finMes} días`) +
+    kpi("Gastos proyectados del mes", dmoney(proyGastos)) +
+    kpi("Utilidad proyectada", dmoney(proyUtilidad), "", proyUtilidad >= 0 ? "good" : "bad") +
+    kpi("Ritmo actual", dmoney(promDia), "por día") +
+    kpi("Días que faltan del mes", faltan);
+
+  const conf = conVentas >= 14 ? "" :
+    ` ⚠ Está calculada con solo ${conVentas} día${conVentas === 1 ? "" : "s"} con ventas: tómala como una señal, no como un pronóstico. Con dos o tres semanas de historial empieza a ser confiable.`;
+  note.textContent =
+    `Método: promedio diario del periodo mostrado (${dmoney(promDia)}) multiplicado por los ${finMes} días del mes. ` +
+    `No toma en cuenta fines de semana, feriados ni temporada.` + conf;
+}
+
+/* --- Gastos ---------------------------------------------------------------- */
+function renderDashExpenses() {
+  const cats = {};
+  DASH.results.forEach((r) => (r.gastos_categoria || []).forEach((c) => {
+    cats[c.categoria] = (cats[c.categoria] || 0) + Number(c.monto || 0);
+  }));
+  const total = Object.values(cats).reduce((a, b) => a + b, 0);
+  const entries = Object.entries(cats).sort((a, b) => b[1] - a[1]);
+
+  $("dash-expense-cats").innerHTML = entries.length
+    ? entries.map(([c, m]) => `<div class="kpi">
+        <div class="kpi-label">${esc(EXPENSE_LABELS[c] || c)}</div>
+        <div class="kpi-value num">${dmoney(m)}</div>
+        <div class="kpi-sub">${total > 0 ? r2((100 * m) / total) : 0}% de los gastos</div></div>`).join("")
+    : '<p class="hint">No hay gastos registrados en este periodo.</p>';
+
+  const body = document.querySelector("#table-expenses tbody");
+  body.innerHTML = DASH.expenses.length ? "" :
+    '<tr><td colspan="6" class="hint">Sin gastos en este periodo.</td></tr>';
+  DASH.expenses.forEach((g) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${esc(fechaCorta(g.spent_on))}/${esc(g.spent_on.slice(0, 4))}</td>
+      <td>${esc((g.locations && g.locations.name) || "")}</td>
+      <td>${esc(EXPENSE_LABELS[g.category] || g.category)}</td>
+      <td>${esc(g.description || "")}</td>
+      <td class="num">${dmoney(g.amount)}</td>
+      <td><div class="row-actions"><button class="icon-btn delete btn-del" type="button" title="Eliminar">${ICON_TRASH}</button></div></td>`;
+    tr.querySelector(".btn-del").addEventListener("click", async () => {
+      if (!confirm(`¿Eliminar el gasto de ${dmoney(g.amount)}?`)) return;
+      const { error } = await sb.from("expenses").delete().eq("id", g.id);
+      if (error) { alert(`No se pudo eliminar: ${error.message}`); return; }
+      await loadDashboard();
+    });
+    body.appendChild(tr);
+  });
+
+  const ids = dashScopeIds();
+  const target = ids.length === 1 ? ids[0] : STATE.activeLocationId;
+  const tLoc = STATE.locations.find((l) => l.id === target);
+  $("ne-target").textContent = tLoc
+    ? (ids.length === 1
+        ? `El gasto se registrará en ${tLoc.name}.`
+        : `Estás viendo el consolidado: el gasto se registrará en ${tLoc.name}. Si es de otra tienda, selecciónala arriba primero.`)
+    : "";
+  if (!$("ne-date").value) $("ne-date").value = localDateStr();
+}
+
+$("btn-add-expense").addEventListener("click", async () => {
+  const msg = $("ne-msg");
+  const monto = parseFloat($("ne-amount").value);
+  if (!(monto > 0)) { msg.textContent = "Pon un monto mayor a cero."; return; }
+  const ids = dashScopeIds();
+  const target = ids.length === 1 ? ids[0] : STATE.activeLocationId;
+  if (!target) { msg.textContent = "No hay una tienda seleccionada."; return; }
+
+  const { error } = await sb.from("expenses").insert({
+    location_id: target,
+    spent_on: $("ne-date").value || localDateStr(),
+    category: $("ne-cat").value,
+    description: $("ne-desc").value.trim() || null,
+    amount: monto,
+    created_by: STATE.profile.id,
+  });
+  if (error) { msg.textContent = `No se pudo registrar: ${error.message}`; return; }
+  msg.textContent = "Gasto registrado.";
+  $("ne-desc").value = ""; $("ne-amount").value = "";
+  await loadDashboard();
+  setTimeout(() => (msg.textContent = ""), 2500);
+});
+
+/* --- Toppings del periodo -------------------------------------------------- */
+function renderDashToppings() {
+  const agg = {};
+  DASH.results.forEach((r) => (r.toppings || []).forEach((t) => {
+    const cur = agg[t.name] || { name: t.name, peso: 0, margen: 0 };
+    cur.peso += Number(t.peso_g || 0);
+    cur.margen += Number(t.margen || 0);
+    agg[t.name] = cur;
+  }));
+  const total = Object.values(agg).reduce((a, b) => a + b.peso, 0);
+  const rows = Object.values(agg).sort((a, b) => a.margen - b.margen);
+
+  const body = document.querySelector("#table-dash-toppings tbody");
+  body.innerHTML = rows.length ? "" :
+    '<tr><td colspan="5" class="hint">No se vendieron toppings en este periodo.</td></tr>';
+  const meta = Number((activeLocation() || {}).margin_target_pct || 0);
+  rows.forEach((r) => {
+    // margen % reconstruido desde el margen y el peso agregados de todas las
+    // tiendas del alcance, para que el consolidado no mienta.
+    const tr = document.createElement("tr");
+    const pct = total > 0 ? r2((100 * r.peso) / total) : 0;
+    tr.innerHTML = `<td>${esc(r.name)}</td>
+      <td class="num">${r2(r.peso)} g</td>
+      <td class="num">${pct}%</td>
+      <td class="num">${dmoney(r.margen)}</td>
+      <td class="num">${r.peso > 0 ? r2(r.margen / r.peso) : 0} / g</td>`;
+    if (meta && r.peso > 0 && r.margen <= 0) tr.classList.add("low-stock");
+    body.appendChild(tr);
+  });
+}
+
+/* ===========================================================================
+   16. INSTALACION EN EL DISPOSITIVO (service worker)
    ---------------------------------------------------------------------------
    Guarda los archivos de la aplicacion en la tableta para que abra aunque no
    haya internet. Antes, el catalogo y las ventas pendientes ya se guardaban,
@@ -1359,7 +1937,7 @@ if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
 }
 
 /* ===========================================================================
-   16. ARRANQUE
+   17. ARRANQUE
    =========================================================================== */
 (async function init() {
   if (!sb) { showLogin(); return; }

@@ -210,3 +210,62 @@ begin
 exception when unique_violation then
   raise notice 'CORRECTO - rechazado: folio duplicado en la misma sucursal';
 end $$;
+
+\echo ''
+\echo '=== TEST 12: los GASTOS tambien estan aislados por sucursal ==='
+-- Un gasto es informacion sensible del negocio (renta, planilla). Se aisla
+-- igual que todo lo demas: en la base, no en la pantalla.
+insert into public.expenses (location_id, spent_on, category, description, amount)
+values ((select id from locations where name='Tuti''s Galerías'),   current_date, 'renta', 'Renta Galerias',   12000),
+       ((select id from locations where name='Tuti''s Multiplaza'), current_date, 'renta', 'Renta Multiplaza', 11000);
+
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';  -- gerente Galerías
+select 'gastos visibles para gerente Galerias (debe ser 1)' as prueba, count(*) as filas from expenses;
+select 'y el que ve es el suyo (debe decir Galerias)' as prueba, description from expenses;
+reset role; reset request.jwt.claim.sub;
+
+\echo '--- la cajera NO puede registrar gastos ---'
+set role authenticated;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';  -- cajera Galerías
+do $$
+begin
+  insert into public.expenses (location_id, spent_on, category, amount)
+  values ((select id from locations where name='Tuti''s Galerías'), current_date, 'otros', 999);
+  raise notice 'FALLO: la cajera logro registrar un gasto';
+exception when insufficient_privilege or check_violation or others then
+  raise notice 'CORRECTO - rechazado: %', SQLERRM;
+end $$;
+reset role; reset request.jwt.claim.sub;
+
+\echo '--- el gerente de Galerias NO puede registrar un gasto en Multiplaza ---'
+select set_config('tutis.test_multiplaza',
+                  (select id::text from locations where name='Tuti''s Multiplaza'), false);
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+do $$
+begin
+  insert into public.expenses (location_id, spent_on, category, amount)
+  values (current_setting('tutis.test_multiplaza')::uuid, current_date, 'otros', 999);
+  raise notice 'FALLO: el gerente logro cargarle un gasto a la otra tienda';
+exception when others then
+  raise notice 'CORRECTO - rechazado: %', SQLERRM;
+end $$;
+reset role; reset request.jwt.claim.sub;
+
+\echo ''
+\echo '=== TEST 13: el dashboard respeta el aislamiento ==='
+set role authenticated;
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';  -- gerente Galerías
+select 'dashboard de SU tienda (debe traer numeros)' as prueba,
+       (public.dashboard_summary((select id from locations where name='Tuti''s Galerías'),
+                                 current_date - 7, current_date)->>'gastos') as gastos_vistos;
+do $$
+begin
+  perform public.dashboard_summary(current_setting('tutis.test_multiplaza')::uuid,
+                                   current_date - 7, current_date);
+  raise notice 'FALLO: vio el dashboard de la otra tienda';
+exception when others then
+  raise notice 'CORRECTO - rechazado: %', SQLERRM;
+end $$;
+reset role; reset request.jwt.claim.sub;

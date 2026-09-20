@@ -263,3 +263,37 @@ table.data tr.low-stock td { background: var(--danger-bg); }
   body { background: #fff; color: #000; }
   .card { box-shadow: none; border: none; }
 }
+
+/* ===========================================================================
+   DASHBOARD
+   Las gráficas son SVG dibujado a mano, sin librerías: la política de
+   seguridad del sitio (script-src 'self') no permite cargar código de un CDN,
+   y para barras y una línea de promedio no hace falta más.
+   =========================================================================== */
+.filter-bar {
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end;
+}
+.filter-bar .field { margin: 0; min-width: 150px; flex: 0 1 auto; }
+.filter-bar .btn { margin-bottom: 2px; }
+
+.kpi.good  .kpi-value { color: var(--success); }
+.kpi.bad   .kpi-value { color: var(--danger); }
+.kpi-sub { font-size: 0.78rem; color: var(--ink-soft); margin-top: 2px; }
+
+#dash-chart svg { width: 100%; height: auto; display: block; }
+.chart-bar-income  { fill: var(--success); }
+.chart-bar-expense { fill: var(--danger); }
+.chart-avg-line    { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 4 3; fill: none; }
+.chart-axis        { stroke: var(--border); stroke-width: 1; }
+.chart-label       { fill: var(--ink-soft); font-family: var(--font); font-size: 9px; }
+.chart-empty       { color: var(--ink-soft); font-size: 0.9rem; padding: 24px 0; text-align: center; }
+
+.chart-legend {
+  display: flex; flex-wrap: wrap; gap: 16px; margin-top: 10px;
+  font-size: 0.82rem; color: var(--ink-soft);
+}
+.chart-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chart-legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+.chart-legend i.income  { background: var(--success); }
+.chart-legend i.expense { background: var(--danger); }
+.chart-legend i.avg     { background: var(--accent); height: 3px; border-radius: 0; }

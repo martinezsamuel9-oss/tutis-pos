@@ -30,7 +30,7 @@
     <button class="btn primary block big" type="submit" id="login-btn">Entrar</button>
     <p class="alert bad" id="login-error" hidden></p>
     <p class="hint" style="margin-top:14px;" id="login-config-warning" hidden>
-      Falta configurar la conexión con Supabase en el archivo <strong>config.js</strong>.
+      El sistema todavía no está conectado al servidor. Avísale a soporte técnico.
     </p>
   </form>
 </div>
@@ -52,6 +52,7 @@
     </div>
     <div class="topbar-inner" style="padding-top:0;">
       <nav class="tabs" id="tabs">
+        <button class="tab-btn" data-tab="dashboard" data-min-role="gerente">Dashboard</button>
         <button class="tab-btn active" data-tab="venta">Venta</button>
         <button class="tab-btn" data-tab="inventario" data-min-role="gerente">Inventario</button>
         <button class="tab-btn" data-tab="toppings" data-min-role="gerente">Toppings</button>
@@ -63,6 +64,110 @@
   </header>
 
   <main class="app-shell">
+
+
+    <!-- ===================== DASHBOARD ===================== -->
+    <section id="tab-dashboard" class="tab-panel">
+
+      <div class="card no-print">
+        <h2>Qué estás viendo</h2>
+        <div class="filter-bar">
+          <div class="field stack">
+            <label for="dash-location">Tienda</label>
+            <select id="dash-location"></select>
+          </div>
+          <div class="field stack">
+            <label for="dash-range">Periodo</label>
+            <select id="dash-range">
+              <option value="hoy">Hoy</option>
+              <option value="ayer">Ayer</option>
+              <option value="semana" selected>Esta semana</option>
+              <option value="semana_pasada">Semana pasada</option>
+              <option value="mes">Este mes</option>
+              <option value="mes_pasado">Mes pasado</option>
+              <option value="30d">Últimos 30 días</option>
+              <option value="90d">Últimos 90 días</option>
+              <option value="personalizado">Personalizado…</option>
+            </select>
+          </div>
+          <div class="field stack" id="dash-custom-from" hidden>
+            <label for="dash-from">Desde</label><input type="date" id="dash-from">
+          </div>
+          <div class="field stack" id="dash-custom-to" hidden>
+            <label for="dash-to">Hasta</label><input type="date" id="dash-to">
+          </div>
+          <button class="btn ghost" id="btn-dash-refresh" type="button">Actualizar</button>
+        </div>
+        <p class="hint" id="dash-range-label"></p>
+      </div>
+
+      <div class="card">
+        <div class="closing-print-head" id="dash-print-head"></div>
+        <h2>Indicadores</h2>
+        <div id="dash-warnings"></div>
+        <div class="kpi-grid" id="dash-kpis"></div>
+      </div>
+
+      <div class="card">
+        <h2>Ingresos, gastos y utilidad</h2>
+        <div class="sub">Cada barra es un día del periodo. La línea marca el promedio diario de ingresos.</div>
+        <div id="dash-chart"></div>
+        <div class="chart-legend" id="dash-chart-legend"></div>
+      </div>
+
+      <div class="card" id="dash-bystore-card">
+        <h2>Comparativo por tienda</h2>
+        <div class="sub">Las dos sucursales lado a lado en el mismo periodo.</div>
+        <div class="table-wrap"><table class="data" id="table-dash-stores">
+          <thead><tr><th>Sucursal</th><th>Ventas</th><th>Ingresos</th><th>Costo</th><th>Margen</th><th>Gastos</th><th>Utilidad</th><th>Ticket prom.</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+
+      <div class="card">
+        <h2>Proyección</h2>
+        <div class="sub">Estimación a fin de mes a partir de lo que va del periodo. Es una referencia, no una promesa.</div>
+        <div class="kpi-grid" id="dash-projection"></div>
+        <p class="hint" id="dash-projection-note"></p>
+      </div>
+
+      <div class="card">
+        <h2>Gastos</h2>
+        <div class="sub">Lo que cuesta operar la tienda, aparte del costo del producto. Es lo que convierte el margen en utilidad real.</div>
+        <div class="kpi-grid" id="dash-expense-cats"></div>
+        <div class="table-wrap"><table class="data" id="table-expenses">
+          <thead><tr><th>Fecha</th><th>Sucursal</th><th>Categoría</th><th>Descripción</th><th>Monto</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+
+        <h2 style="margin-top:18px;">Registrar un gasto</h2>
+        <div class="field"><label>Fecha</label><input type="date" id="ne-date"></div>
+        <div class="field"><label>Categoría</label><select id="ne-cat">
+          <option value="renta">Renta</option>
+          <option value="planilla">Planilla</option>
+          <option value="insumos">Insumos</option>
+          <option value="servicios">Servicios (luz, agua, internet)</option>
+          <option value="mantenimiento">Mantenimiento</option>
+          <option value="mercadeo">Mercadeo</option>
+          <option value="impuestos">Impuestos</option>
+          <option value="otros">Otros</option>
+        </select></div>
+        <div class="field stack"><label>Descripción</label><input id="ne-desc" placeholder="Ej. Renta de septiembre"></div>
+        <div class="field"><label>Monto</label><input id="ne-amount" type="number" step="0.01" min="0"></div>
+        <p class="hint" id="ne-target"></p>
+        <button class="btn primary" id="btn-add-expense">Agregar gasto</button>
+        <p class="hint" id="ne-msg"></p>
+      </div>
+
+      <div class="card">
+        <h2>Toppings del periodo</h2>
+        <div class="sub">Cuánto se vendió de cada uno y qué margen dejó. De menor a mayor margen.</div>
+        <div class="table-wrap"><table class="data" id="table-dash-toppings">
+          <thead><tr><th>Topping</th><th>Peso vendido</th><th>% del total</th><th>Margen</th><th>Margen %</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+    </section>
 
     <!-- ===================== VENTA ===================== -->
     <section id="tab-venta" class="tab-panel active">
@@ -288,12 +393,29 @@
       <div class="card">
         <h2>Personal</h2>
         <div class="sub">
-          Primero crea a la persona en Supabase → Authentication → Users (o que se registre).
-          Aquí le asignas su rol y su tienda. Una cajera o gerente solo verá la sucursal que le pongas.
+          Aquí das de alta a tus gerentes y cajeras, y les asignas su rol y su tienda.
+          Una cajera o gerente solo verá la sucursal que le pongas: nunca la otra.
         </div>
         <div class="table-wrap"><table class="data" id="table-profiles">
           <thead><tr><th>Nombre</th><th>Rol</th><th>Sucursal</th><th>Activo</th><th></th></tr></thead><tbody></tbody>
         </table></div>
+
+        <h2 style="margin-top:22px;">Dar de alta a alguien nuevo</h2>
+        <div class="sub">
+          La contraseña que pongas aquí es la que usará esa persona para entrar la primera vez.
+          Dásela en persona y pídele que la cambie.
+        </div>
+        <div class="field stack"><label>Nombre completo</label><input id="nu-name" placeholder="Ej. María López"></div>
+        <div class="field stack"><label>Correo</label><input id="nu-email" type="email" autocomplete="off" placeholder="maria@tutis.com"></div>
+        <div class="field stack"><label>Contraseña temporal</label><input id="nu-password" type="text" autocomplete="off" placeholder="mínimo 6 caracteres"></div>
+        <div class="field"><label>Rol</label><select id="nu-role">
+          <option value="cajera">Cajera</option>
+          <option value="gerente">Gerente de tienda</option>
+          <option value="propietario">Propietario</option>
+        </select></div>
+        <div class="field"><label>Sucursal</label><select id="nu-location"></select></div>
+        <button class="btn primary" id="btn-add-user">Crear usuario</button>
+        <p class="hint" id="nu-msg"></p>
       </div>
     </section>
   </main>

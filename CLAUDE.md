@@ -55,9 +55,10 @@ Todos están implementados. El 1 está implementado como "listo para conectar"
 ```
 sql/01_schema.sql   tablas, enums, RLS, process_sale(), daily_closing()
 sql/02_seed.sql     2 sucursales + catálogo de arranque
-sql/pruebas/        pruebas de aislamiento (ver sección 6) — 11 pruebas
+sql/03_dashboard.sql tabla de gastos + dashboard_summary()
+sql/pruebas/        pruebas de aislamiento (ver sección 6) — 13 pruebas
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
-web/app.js          toda la lógica (16 secciones numeradas)
+web/app.js          toda la lógica (17 secciones numeradas)
 web/styles.css      estilos, modo día/noche
 web/config.js       credenciales — ÚNICO archivo que el dueño edita
 web/sw.js           service worker: app shell offline
@@ -120,7 +121,7 @@ Cada una resuelve un problema concreto; revertirlas rompe algo:
 | Rol | Alcance | Puede |
 |---|---|---|
 | `cajera` | solo su sucursal | cobrar (vía RPC), ver catálogo |
-| `gerente` | solo su sucursal | todo lo anterior + inventario, toppings, precios, reportes, configuración de SU tienda |
+| `gerente` | solo su sucursal | todo lo anterior + dashboard, gastos, inventario, toppings, precios, reportes, configuración de SU tienda |
 | `propietario` | todas | todo + crear sucursales + asignar roles y tiendas |
 
 `profiles.location_id` es NULL solo para el propietario. Un usuario sin
@@ -131,6 +132,35 @@ para que nadie vea datos por accidente al registrarse.
 viceversa. Solo el dueño ve ambas, y necesita reportes **por tienda**, no solo
 consolidados.
 
+## 3.1 Dashboard y gastos
+
+La pestaña **Dashboard** va primero, antes de Venta, y es la pantalla inicial de
+gerente y propietario (la cajera sigue aterrizando en Venta y no ve la pestaña).
+
+- Los números salen de `dashboard_summary()` en la base, una llamada por
+  sucursal. El cliente suma: así el propietario ve cada tienda y el consolidado
+  sin que la base sepa nada de "consolidado", y el permiso se sigue revisando
+  en la base sucursal por sucursal.
+- **Gastos** (`expenses`) es lo que faltaba para tener utilidad de verdad:
+  `utilidad = margen del producto − gastos de operar`. La cajera no los ve ni
+  los registra.
+- **Las gráficas son SVG escrito a mano.** No hay librería de gráficas y no la
+  puede haber: la CSP es `script-src 'self'`. Si el periodo pasa de 45 días,
+  las barras se agrupan por semana.
+- **La proyección es una regla de tres, y lo dice en pantalla**: promedio
+  diario × días del mes. Con menos de 14 días con ventas muestra una
+  advertencia explícita. No se debe cambiar por un modelo que parezca más
+  seguro de lo que es.
+
+**Altas de personal desde la aplicación**: el propietario crea usuarios en la
+pestaña Sucursales y usuarios. Se hace con `signUp()` sobre un **cliente de
+Supabase aparte con `persistSession: false`** — con el cliente normal, el
+usuario recién creado se apoderaría de la sesión y sacaría al propietario. Esto
+exige que en el proyecto el registro esté habilitado y la confirmación de
+correo apagada. El riesgo está contenido por diseño: quien se registre solo
+nace sin sucursal, y sin sucursal la aplicación no lo deja entrar y RLS no le
+muestra nada.
+
 ## 4. Restricciones permanentes (pedidas explícitamente)
 
 - **NUNCA incluir el sitio web `https://tutis.innova504.com/` en la factura o
@@ -139,6 +169,9 @@ consolidados.
   en el futuro.
 - **Todo el texto en Arial**, tanto en pantalla como en lo que se imprime.
 - **Modo día y modo noche**, con la elección recordada en el navegador.
+- **La interfaz nunca menciona Supabase, `config.js` ni nada técnico.** El
+  cliente final no tiene por qué saber con qué está hecho: cuando algo falla
+  por configuración, el mensaje dice "avísale a soporte técnico".
 - En las tablas, guardar y eliminar van con **iconos** (disquete y papelera),
   no con texto.
 - La pantalla de venta debe mostrar **peso de helado, peso de toppings, peso de
@@ -173,6 +206,7 @@ $PGBIN/pg_ctl -D /tmp/pg/data -o '-p 5433 -k /tmp/pg' start
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/00_simulacion_supabase.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/01_schema.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/02_seed.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/03_dashboard.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_aislamiento.sql
 ```
 

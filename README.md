@@ -39,6 +39,8 @@ computadoras de las tiendas: se abre en el navegador.
    pégalo y dale **Run**. Debe decir "Success".
 3. Nueva consulta, ahora con `sql/02_seed.sql` (las 2 sucursales y el catálogo
    de arranque). **Run**.
+4. Nueva consulta, ahora con `sql/03_dashboard.sql` (los gastos y los números
+   del tablero). **Run**.
 
 ### Paso 3 — Crear tu usuario y volverte propietario
 
@@ -92,13 +94,37 @@ sitios con HTTPS, y el modo sin conexión (service worker) tampoco funciona sin
 
 ### Paso 6 — Dar de alta al personal
 
-1. Para cada gerente o cajera: Supabase → **Authentication** → **Users** →
-   **Add user** (correo y contraseña).
-2. Entra a la aplicación como propietario → pestaña **Sucursales y usuarios**.
-3. Ahí aparece cada persona. Asígnale su **rol** y su **sucursal**, y guarda.
+Entra como propietario → pestaña **Sucursales y usuarios** → abajo, en
+**"Dar de alta a alguien nuevo"**: nombre, correo, una contraseña temporal, el
+rol y la tienda. Listo, esa persona ya puede entrar.
+
+La contraseña que pongas es la que usará la primera vez; dásela en persona.
 
 Mientras no tenga sucursal asignada, el sistema no la deja entrar — a propósito,
 para que nadie vea datos por accidente.
+
+## El tablero
+
+La pestaña **Dashboard** es lo primero que ve un gerente o el propietario al
+entrar. Muestra, del periodo que elijas:
+
+- **Ingresos, costo del producto, margen, gastos y utilidad.** La utilidad es
+  el número que importa: lo que dejó el producto, menos lo que cuesta tener la
+  tienda abierta.
+- **Ticket promedio, promedio diario, vasos, cucharas, gramos vendidos.**
+- **Una gráfica** de ingresos y gastos día por día (o por semana si el periodo
+  es largo), con la línea del promedio.
+- **Comparativo de las dos tiendas** lado a lado, cuando ves el consolidado.
+- **Proyección a fin de mes.** Es el promedio diario por los días del mes, y
+  así lo dice en pantalla. Con menos de dos semanas de datos te avisa que no
+  te fíes todavía.
+- **Gastos** por categoría, con el formulario para registrarlos.
+
+Los filtros son por tienda (cada una o las dos juntas) y por periodo: hoy,
+ayer, esta semana, la pasada, este mes, el pasado, 30 días, 90 días, o el rango
+que quieras.
+
+La cajera no ve esta pestaña: no tiene por qué conocer márgenes ni gastos.
 
 ## Cómo se usa cada rol
 
@@ -106,9 +132,9 @@ para que nadie vea datos por accidente.
 helado y los toppings, cobra, e imprime el comprobante. No puede cambiar precios
 ni costos, ni ver reportes, ni ver la otra sucursal.
 
-**Gerente de tienda.** Todo lo de su tienda: inventario, parametrización de
-toppings, precios, reportes, cierre del día y configuración de esa sucursal.
-Nada de la otra tienda.
+**Gerente de tienda.** Todo lo de su tienda: tablero, gastos, inventario,
+parametrización de toppings, precios, reportes, cierre del día y configuración
+de esa sucursal. Nada de la otra tienda.
 
 **Propietario.** Ve las dos (o las que sean) sucursales, con reportes por tienda
 y consolidados. Crea sucursales nuevas, y asigna roles y tiendas al personal.
@@ -196,6 +222,7 @@ tutis-web/
   sql/
     01_schema.sql     Tablas, roles, permisos y funciones (correr primero)
     02_seed.sql       Las 2 sucursales y el catálogo de arranque
+    03_dashboard.sql  Gastos y los cálculos del tablero
     pruebas/          Pruebas de aislamiento en un PostgreSQL local
   web/                <- esta carpeta es la que se publica
     index.html        La aplicación
