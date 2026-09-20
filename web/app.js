@@ -38,6 +38,35 @@ function localDateStr(d) {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
 }
 
+// --- Unidad de peso preferida ----------------------------------------------
+// En la base los pesos SIEMPRE son gramos. Esto es solo cómo se muestran y con
+// qué unidad arrancan los campos. Si cada tienda guardara en su unidad, un
+// reporte que sume dos sucursales estaría sumando peras con manzanas.
+function prefUnit() {
+  const loc = activeLocation();
+  return (loc && loc.default_weight_unit === "oz") ? "oz" : "g";
+}
+function inPref(grams) {
+  return prefUnit() === "oz" ? r2(toOz(grams)) : r2(grams);
+}
+// Muestra el peso en la unidad preferida y la otra entre paréntesis: el
+// requisito original pedía gramos Y onzas, no una u otra.
+function fmtWeight(grams) {
+  const g = r2(grams), oz = r2(toOz(grams));
+  return prefUnit() === "oz" ? `${oz} oz (${g} g)` : `${g} g (${oz} oz)`;
+}
+// Versión corta, para tablas donde no cabe el paréntesis.
+function fmtWeightShort(grams) {
+  return prefUnit() === "oz" ? `${r2(toOz(grams))} oz` : `${r2(grams)} g`;
+}
+
+// Deja los botones g/oz de un campo marcando la unidad que toca.
+function markUnitButtons(containerId, unit) {
+  document.querySelectorAll(`#${containerId} button`).forEach((b) => {
+    b.classList.toggle("active", b.dataset.unit === unit);
+  });
+}
+
 function money(v) {
   const code = (activeLocation() && activeLocation().currency_code) || "";
   return `${code} ${(Number(v) || 0).toFixed(2)}`;
@@ -513,9 +542,30 @@ function fillSaleSelectors() {
   if (keep.spoon)  spoonSel.value = keep.spoon;
   if (keep.flavor) flavorSel.value = keep.flavor;
 
+  aplicarUnidadPreferida();
+
   const loc = activeLocation();
-  $("price-per-gram-hint").textContent = loc ? `Precio único: ${money(loc.price_per_gram)} por gramo` : "";
+  $("price-per-gram-hint").textContent = loc
+    ? (prefUnit() === "oz"
+        ? `Precio único: ${money(Number(loc.price_per_gram) * OZ_TO_G)} por onza`
+        : `Precio único: ${money(loc.price_per_gram)} por gramo`)
+    : "";
   prefillCupWeight();
+}
+
+// Pone los tres campos de peso en la unidad que eligió la tienda. Solo actúa
+// cuando la unidad cambió: si la cajera ya movió un botón a mano en plena
+// venta, no se lo pisamos.
+let unidadAplicada = null;
+function aplicarUnidadPreferida() {
+  const u = prefUnit();
+  if (u === unidadAplicada) return;
+  unidadAplicada = u;
+  iceUnit = u; cupUnit = u; totalUnit = u;
+  markUnitButtons("unit-ice", u);
+  markUnitButtons("unit-cup", u);
+  markUnitButtons("unit-total", u);
+  $("inp-cup-weight").dataset.auto = "1";
 }
 
 function prefillCupWeight() {
@@ -540,7 +590,7 @@ function renderToppingChips() {
     chip.className = "chip" + (t.tier === 2 ? " tier2" : "");
     chip.innerHTML = `${esc(t.name)}<span class="chip-cat">${esc(t.category)}</span>`;
     chip.addEventListener("click", () => {
-      orderRows.push({ rowId: "r" + Date.now() + Math.random(), toppingId: t.id, weight: 0, unit: "g" });
+      orderRows.push({ rowId: "r" + Date.now() + Math.random(), toppingId: t.id, weight: 0, unit: prefUnit() });
       renderOrderRows(); renderQuote();
     });
     wrap.appendChild(chip);
@@ -643,23 +693,23 @@ function renderQuote() {
   linesEl.innerHTML = result.lines.map((l) => `
     <div class="ticket-line">
       <span class="tl-name">${esc(l.name)}
-        <span class="tl-meta">${l.weight_g ? r2(l.weight_g) + "g · " : ""}costo ${money(l.cost)}${l.is_premium_surcharge ? " · premium" : ""}</span>
+        <span class="tl-meta">${l.weight_g ? fmtWeightShort(l.weight_g) + " · " : ""}costo ${money(l.cost)}${l.is_premium_surcharge ? " · premium" : ""}</span>
       </span>
       <span class="num">${money(l.price_contribution)}</span>
     </div>`).join("");
 
   totalsEl.innerHTML = `
-    <div><span>Peso del vaso</span><span class="num">${r2(tareG)} g</span></div>
-    <div><span>Peso del helado</span><span class="num">${r2(iceG)} g</span></div>
-    <div><span>Peso de toppings${usingScale ? " (calculado)" : ""}</span><span class="num">${r2(toppingsG)} g</span></div>
-    <div><span>Peso total</span><span class="num">${displayedTotalG} g (${r2(toOz(displayedTotalG))} oz)</span></div>
+    <div><span>Peso del vaso</span><span class="num">${fmtWeightShort(tareG)}</span></div>
+    <div><span>Peso del helado</span><span class="num">${fmtWeightShort(iceG)}</span></div>
+    <div><span>Peso de toppings${usingScale ? " (calculado)" : ""}</span><span class="num">${fmtWeightShort(toppingsG)}</span></div>
+    <div><span>Peso total</span><span class="num">${fmtWeight(displayedTotalG)}</span></div>
     <div><span>Costo real</span><span class="num">${money(result.total_cost)}</span></div>
     <div><span>Margen</span><span class="num">${money(result.margin)} (${result.margin_pct}%)</span></div>
     <div class="tt-total"><span>Total</span><span class="num">${money(result.total_price)}</span></div>`;
 
   const alerts = [...result.alerts];
   if (usingScale && Math.abs(scaleTotalG - result.gross_weight_g) > 0.5) {
-    alerts.unshift(`La báscula marca ${r2(scaleTotalG)}g, pero vaso + helado + toppings registrados suman ${result.gross_weight_g}g (diferencia de ${r2(Math.abs(scaleTotalG - result.gross_weight_g))}g). Revisa antes de cobrar.`);
+    alerts.unshift(`La báscula marca ${fmtWeightShort(scaleTotalG)}, pero vaso + helado + toppings registrados suman ${fmtWeightShort(result.gross_weight_g)} (diferencia de ${fmtWeightShort(Math.abs(scaleTotalG - result.gross_weight_g))}). Revisa antes de cobrar.`);
   }
   alertsEl.innerHTML = alerts.map((a) => `<div class="alert warn">${esc(a)}</div>`).join("");
 }
@@ -756,10 +806,13 @@ function showReceipt(payload, result, folio, offline) {
   const t = TAX[loc.country_code] || TAX.HN;
   const items = result.lines
     .filter((l) => !(l.item_type === "cuchara" && l.price_contribution === 0))
-    .map((l) => `${esc(l.name)}${l.weight_g ? "  " + r2(l.weight_g) + "g" : ""}   ${money(l.price_contribution)}`)
+    .map((l) => `${esc(l.name)}${l.weight_g ? "  " + fmtWeightShort(l.weight_g) : ""}   ${money(l.price_contribution)}`)
     .join("\n");
 
-  $("receipt-body").innerHTML = `<div class="ticket" style="white-space:pre-wrap;">
+  const logo = loc.logo_data_url
+    ? `<div class="doc-logo"><img src="${esc(loc.logo_data_url)}" alt=""></div>`
+    : "";
+  $("receipt-body").innerHTML = logo + `<div class="ticket" style="white-space:pre-wrap;">
 ${esc(loc.legal_name || loc.name)}
 ${esc(loc.name)}
 ${t.id}: ${esc(loc.tax_id_value || "(pendiente de registrar)")}
@@ -772,7 +825,7 @@ Cliente: ${esc(payload.customer_name || "Consumidor Final")}
 ------------------------------
 ${items}
 ------------------------------
-PESO TOTAL: ${result.gross_weight_g} g
+PESO TOTAL: ${fmtWeight(result.gross_weight_g)}
 TOTAL: ${money(result.total_price)}
 ------------------------------
 NO ES UNA FACTURA FISCAL VÁLIDA — pendiente de
@@ -997,7 +1050,7 @@ function renderReports() {
     tr.innerHTML = `<td>${s.created_at ? new Date(s.created_at).toLocaleString() : ""}</td>
       <td>${esc((s.locations && s.locations.name) || "")}</td>
       <td>${esc(s.cashier_name || "")}</td>
-      <td class="num">${r2(s.gross_weight_g)} g</td>
+      <td class="num">${fmtWeightShort(s.gross_weight_g)}</td>
       <td class="num">${money(s.total_price)}</td>
       <td class="num">${money(s.margin)} (${r2(s.margin_pct)}%)</td>`;
     salesBody.appendChild(tr);
@@ -1033,7 +1086,7 @@ async function renderToppingMargins(sales) {
   rows.forEach((r) => {
     const tr = document.createElement("tr");
     if (loc && r.pct < Number(loc.margin_target_pct)) tr.classList.add("low-stock");
-    tr.innerHTML = `<td>${esc(r.name)}</td><td class="num">${r2(r.peso)} g</td><td class="num">${money(r.costo)}</td>
+    tr.innerHTML = `<td>${esc(r.name)}</td><td class="num">${fmtWeightShort(r.peso)}</td><td class="num">${money(r.costo)}</td>
       <td class="num">${money(r.precio)}</td><td class="num">${money(r.margen)}</td><td class="num">${r.pct}%</td>`;
     marginsBody.appendChild(tr);
   });
@@ -1079,13 +1132,13 @@ async function renderClosing() {
   const scopeName = scope
     ? (STATE.locations.find((l) => l.id === scope) || {}).name || ""
     : "Todas las sucursales";
-  $("closing-print-head").innerHTML = `<strong>${esc(scopeName)}</strong> — Cierre del día ${dateInput.value}`;
+  $("closing-print-head").innerHTML = logoHtml() + `<strong>${esc(scopeName)}</strong> — Cierre del día ${dateInput.value}`;
 
   $("closing-summary").innerHTML = mixedCurrencyWarning() + `
     <div class="kpi"><div class="kpi-label">Vasos vendidos</div><div class="kpi-value num">${totals.vasos}</div></div>
     <div class="kpi"><div class="kpi-label">Cucharas vendidas</div><div class="kpi-value num">${totals.cucharas}</div></div>
-    <div class="kpi"><div class="kpi-label">Peso de helado vendido</div><div class="kpi-value num">${r2(totals.helado)} g</div><div class="hint">${r2(toOz(totals.helado))} oz</div></div>
-    <div class="kpi"><div class="kpi-label">Peso de toppings vendido</div><div class="kpi-value num">${r2(totals.toppings)} g</div><div class="hint">${r2(toOz(totals.toppings))} oz</div></div>
+    <div class="kpi"><div class="kpi-label">Peso de helado vendido</div><div class="kpi-value num">${fmtWeightShort(totals.helado)}</div><div class="hint">${prefUnit() === "oz" ? r2(totals.helado) + " g" : r2(toOz(totals.helado)) + " oz"}</div></div>
+    <div class="kpi"><div class="kpi-label">Peso de toppings vendido</div><div class="kpi-value num">${fmtWeightShort(totals.toppings)}</div><div class="hint">${prefUnit() === "oz" ? r2(totals.toppings) + " g" : r2(toOz(totals.toppings)) + " oz"}</div></div>
     <div class="kpi"><div class="kpi-label">Ventas</div><div class="kpi-value num">${totals.ventas}</div></div>
     <div class="kpi"><div class="kpi-label">Ingresos</div><div class="kpi-value num">${money(totals.ingresos)}</div></div>`;
 
@@ -1103,7 +1156,7 @@ async function renderClosing() {
   body.innerHTML = rows.length ? "" : '<tr><td colspan="3" class="hint">No hay ventas con toppings ese día.</td></tr>';
   rows.forEach((r) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${esc(r.name)}</td><td class="num">${r2(r.peso)} g</td><td class="num">${r.pct}%</td>`;
+    tr.innerHTML = `<td>${esc(r.name)}</td><td class="num">${fmtWeightShort(r.peso)}</td><td class="num">${r.pct}%</td>`;
     body.appendChild(tr);
   });
 
@@ -1123,12 +1176,12 @@ function closingReportText() {
     L.push(`  Ventas registradas: ${c.ventas}`);
     L.push(`  Vasos vendidos: ${c.vasos}`);
     L.push(`  Cucharas vendidas: ${c.cucharas}`);
-    L.push(`  Peso de helado vendido: ${r2(c.peso_helado_g)} g (${r2(toOz(c.peso_helado_g))} oz)`);
-    L.push(`  Peso de toppings vendido: ${r2(c.peso_toppings_g)} g (${r2(toOz(c.peso_toppings_g))} oz)`);
+    L.push(`  Peso de helado vendido: ${fmtWeight(c.peso_helado_g)}`);
+    L.push(`  Peso de toppings vendido: ${fmtWeight(c.peso_toppings_g)}`);
     L.push(`  Ingresos: ${c.ingresos}`);
     L.push("  Toppings vendidos:");
     if (!(c.toppings || []).length) L.push("    (sin ventas de toppings)");
-    else (c.toppings || []).forEach((t) => L.push(`    - ${t.name}: ${r2(t.peso_g)} g (${t.pct}%)`));
+    else (c.toppings || []).forEach((t) => L.push(`    - ${t.name}: ${fmtWeightShort(t.peso_g)} (${t.pct}%)`));
     L.push("");
   });
   return L.join("\n");
@@ -1165,9 +1218,117 @@ function fillConfigForm() {
   $("cfg-include-cup").checked = !!c.include_cup_weight_in_price;
   $("cfg-margin-target").value = c.margin_target_pct;
   $("cfg-report-email").value = c.report_email || "";
+  $("cfg-weight-unit").value = c.default_weight_unit || "g";
+  actualizarPistaUnidad();
+  pintarLogo(c.logo_data_url);
   $("cfg-invoice-status").textContent =
     "Mientras no se conecte un proveedor certificado (FEL en Guatemala, DTE en El Salvador, SAR en Honduras), cada venta genera un comprobante interno con todos los campos legales listos, claramente marcado como no fiscal.";
 }
+
+const LOGO_MAX_PX = 480;          // suficiente para imprimir sin pesar
+const LOGO_MAX_CHARS = 300000;    // el mismo tope que impone la base
+
+function actualizarPistaUnidad() {
+  const u = $("cfg-weight-unit").value;
+  const precio = parseFloat($("cfg-price-gram").value) || 0;
+  $("cfg-unit-hint").textContent = u === "oz"
+    ? `Los pesos se mostrarán en onzas (con los gramos entre paréntesis). El precio quedará como ${r2(precio * OZ_TO_G)} por onza.`
+    : "Los pesos se mostrarán en gramos (con las onzas entre paréntesis).";
+}
+$("cfg-weight-unit").addEventListener("change", actualizarPistaUnidad);
+$("cfg-price-gram").addEventListener("input", () => {
+  $("cfg-price-oz-hint").textContent = `≈ ${r2((parseFloat($("cfg-price-gram").value) || 0) * OZ_TO_G)} por onza`;
+  actualizarPistaUnidad();
+});
+
+// El logo que encabeza un reporte impreso. Cuando el propietario mira el
+// consolidado no hay "una" tienda, así que se usa el de la que tiene abierta.
+function logoHtml() {
+  const loc = activeLocation();
+  return loc && loc.logo_data_url
+    ? `<div class="doc-logo"><img src="${esc(loc.logo_data_url)}" alt=""></div>`
+    : "";
+}
+
+function pintarLogo(dataUrl) {
+  const box = $("cfg-logo-preview");
+  if (dataUrl) {
+    box.innerHTML = `<img src="${esc(dataUrl)}" alt="Logo de la tienda">`;
+    $("btn-remove-logo").hidden = false;
+  } else {
+    box.innerHTML = '<span class="hint">Sin logo</span>';
+    $("btn-remove-logo").hidden = true;
+  }
+}
+
+// Reduce la imagen antes de guardarla. Sin esto, una foto del celular de 4 MB
+// se guardaría entera en la fila de la sucursal, y esa fila es lo primero que
+// pide la caja al abrir: volvería lento justo el arranque.
+function reducirImagen(file) {
+  return new Promise((resolve, reject) => {
+    const lector = new FileReader();
+    lector.onerror = () => reject(new Error("No se pudo leer el archivo."));
+    lector.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Ese archivo no parece una imagen válida."));
+      img.onload = () => {
+        const escala = Math.min(1, LOGO_MAX_PX / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * escala));
+        const h = Math.max(1, Math.round(img.height * escala));
+        const lienzo = document.createElement("canvas");
+        lienzo.width = w; lienzo.height = h;
+        lienzo.getContext("2d").drawImage(img, 0, 0, w, h);
+        // PNG conserva la transparencia, que es lo que se quiere para un logo
+        // sobre papel. Si sale muy pesado, se reintenta en JPEG con fondo.
+        let out = lienzo.toDataURL("image/png");
+        if (out.length > LOGO_MAX_CHARS) {
+          const ctx = lienzo.getContext("2d");
+          ctx.globalCompositeOperation = "destination-over";
+          ctx.fillStyle = "#FFFFFF"; ctx.fillRect(0, 0, w, h);
+          out = lienzo.toDataURL("image/jpeg", 0.82);
+        }
+        if (out.length > LOGO_MAX_CHARS) {
+          reject(new Error("Esa imagen es demasiado pesada aun después de reducirla. Usa una más sencilla."));
+          return;
+        }
+        resolve(out);
+      };
+      img.src = lector.result;
+    };
+    lector.readAsDataURL(file);
+  });
+}
+
+$("cfg-logo-file").addEventListener("change", async (e) => {
+  const file = e.target.files && e.target.files[0];
+  const msg = $("cfg-logo-msg");
+  if (!file) return;
+  if (!navigator.onLine) { msg.textContent = "Sin conexión: cambiar el logo necesita internet."; return; }
+  msg.textContent = "Procesando la imagen…";
+  try {
+    const dataUrl = await reducirImagen(file);
+    const { error } = await sb.from("locations")
+      .update({ logo_data_url: dataUrl }).eq("id", STATE.activeLocationId);
+    if (error) throw error;
+    pintarLogo(dataUrl);
+    msg.textContent = `Logo guardado (${Math.round(dataUrl.length / 1024)} KB). Ya sale en los comprobantes y reportes.`;
+    await loadData();
+  } catch (ex) {
+    msg.textContent = `No se pudo guardar el logo: ${ex.message}`;
+  } finally {
+    e.target.value = "";
+  }
+});
+
+$("btn-remove-logo").addEventListener("click", async () => {
+  if (!confirm("¿Quitar el logo de esta tienda?")) return;
+  const { error } = await sb.from("locations")
+    .update({ logo_data_url: null }).eq("id", STATE.activeLocationId);
+  if (error) { $("cfg-logo-msg").textContent = `No se pudo quitar: ${error.message}`; return; }
+  pintarLogo(null);
+  $("cfg-logo-msg").textContent = "Logo quitado.";
+  await loadData();
+});
 
 $("cfg-country").addEventListener("change", (e) => {
   $("cfg-taxid-label").textContent = TAX_LABELS[e.target.value] || "NIT";
@@ -1183,11 +1344,16 @@ $("btn-save-config").addEventListener("click", async () => {
     include_cup_weight_in_price: $("cfg-include-cup").checked,
     margin_target_pct: parseFloat($("cfg-margin-target").value) || 0,
     report_email: $("cfg-report-email").value.trim(),
+    default_weight_unit: $("cfg-weight-unit").value,
   }).eq("id", STATE.activeLocationId);
 
   const msg = $("config-saved");
   msg.textContent = error ? `No se pudo guardar: ${error.message}` : "Configuración guardada.";
-  if (!error) { await loadData(); setTimeout(() => (msg.textContent = ""), 2500); }
+  if (!error) {
+    unidadAplicada = null;   // fuerza que los campos de peso tomen la unidad nueva
+    await loadData();
+    setTimeout(() => (msg.textContent = ""), 2500);
+  }
 });
 
 /* ===========================================================================
@@ -1637,7 +1803,7 @@ function renderDashboard() {
   const fmt = (iso) => { const [y, m, d] = iso.split("-"); return `${d}/${m}/${y}`; };
   const nDias = dashDayCount();
   $("dash-range-label").textContent = `Mostrando ${scopeName} — del ${fmt(DASH.from)} al ${fmt(DASH.to)} (${nDias} día${nDias === 1 ? "" : "s"}).`;
-  $("dash-print-head").innerHTML = `<strong>${esc(scopeName)}</strong> — del ${fmt(DASH.from)} al ${fmt(DASH.to)}`;
+  $("dash-print-head").innerHTML = logoHtml() + `<strong>${esc(scopeName)}</strong> — del ${fmt(DASH.from)} al ${fmt(DASH.to)}`;
   $("dash-warnings").innerHTML = dashMixedCurrencyWarning();
 
   const margenPct = t.ingresos > 0 ? r2((100 * t.margen) / t.ingresos) : 0;
@@ -1661,8 +1827,8 @@ function renderDashboard() {
     kpi("Ticket promedio", dmoney(ticket)) +
     kpi("Promedio diario", dmoney(diaria), `sobre ${nDias} día${nDias === 1 ? "" : "s"}`) +
     kpi("Vasos", t.vasos, `${t.cucharas} cucharas`) +
-    kpi("Helado vendido", `${r2(t.helado)} g`, `${r2(toOz(t.helado))} oz`) +
-    kpi("Toppings vendidos", `${r2(t.toppings)} g`, `${r2(toOz(t.toppings))} oz`);
+    kpi("Helado vendido", fmtWeightShort(t.helado), prefUnit() === "oz" ? `${r2(t.helado)} g` : `${r2(toOz(t.helado))} oz`) +
+    kpi("Toppings vendidos", fmtWeightShort(t.toppings), prefUnit() === "oz" ? `${r2(t.toppings)} g` : `${r2(toOz(t.toppings))} oz`);
 
   renderDashChart(serie);
   renderDashStores();
@@ -1910,10 +2076,10 @@ function renderDashToppings() {
     const tr = document.createElement("tr");
     const pct = total > 0 ? r2((100 * r.peso) / total) : 0;
     tr.innerHTML = `<td>${esc(r.name)}</td>
-      <td class="num">${r2(r.peso)} g</td>
+      <td class="num">${fmtWeightShort(r.peso)}</td>
       <td class="num">${pct}%</td>
       <td class="num">${dmoney(r.margen)}</td>
-      <td class="num">${r.peso > 0 ? r2(r.margen / r.peso) : 0} / g</td>`;
+      <td class="num">${r.peso > 0 ? r2(prefUnit() === "oz" ? (r.margen / toOz(r.peso)) : (r.margen / r.peso)) : 0} / ${prefUnit()}</td>`;
     if (meta && r.peso > 0 && r.margen <= 0) tr.classList.add("low-stock");
     body.appendChild(tr);
   });

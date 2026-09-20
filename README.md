@@ -41,6 +41,8 @@ computadoras de las tiendas: se abre en el navegador.
    de arranque). **Run**.
 4. Nueva consulta, ahora con `sql/03_dashboard.sql` (los gastos y los números
    del tablero). **Run**.
+5. Nueva consulta, ahora con `sql/04_logo_y_unidades.sql` (el logo y la unidad
+   de peso). **Run**.
 
 ### Paso 3 — Crear tu usuario y volverte propietario
 
@@ -125,6 +127,28 @@ ayer, esta semana, la pasada, este mes, el pasado, 30 días, 90 días, o el rang
 que quieras.
 
 La cajera no ve esta pestaña: no tiene por qué conocer márgenes ni gastos.
+
+## Logo y unidad de peso
+
+Las dos se configuran por tienda, en **Configuración**:
+
+- **Logo.** Subes un PNG o JPG y sale en los comprobantes de venta y en los
+  reportes que imprimas. La aplicación lo reduce sola, así que puedes subir la
+  imagen tal como la tengas sin volver lenta la caja. Como se guarda junto con
+  el catálogo, el comprobante sale con logo **aunque no haya internet**.
+- **Unidad de peso.** Eliges si esa tienda trabaja en **gramos** o en
+  **onzas**. Los campos de peso arrancan en esa unidad, los totales se
+  muestran en ella (con la otra entre paréntesis) y el precio aparece por
+  gramo o por onza según corresponda. Los dos botones siguen estando en cada
+  campo, así que en cualquier momento se puede pesar en la otra.
+
+  Por dentro todo se guarda siempre en gramos. Eso es lo que permite que el
+  consolidado de las dos tiendas sea correcto aunque cada una trabaje en una
+  unidad distinta.
+
+  Si cambias la unidad a media venta, las líneas de topping que ya estaban en
+  pantalla conservan la suya — reinterpretar un "30" de gramos a onzas
+  multiplicaría el cobro por 28.
 
 ## Cómo se usa cada rol
 
@@ -223,6 +247,7 @@ tutis-web/
     01_schema.sql     Tablas, roles, permisos y funciones (correr primero)
     02_seed.sql       Las 2 sucursales y el catálogo de arranque
     03_dashboard.sql  Gastos y los cálculos del tablero
+    04_logo_y_unidades.sql  Logo de la empresa y unidad de peso
     pruebas/          Pruebas de aislamiento en un PostgreSQL local
   web/                <- esta carpeta es la que se publica
     index.html        La aplicación

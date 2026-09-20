@@ -56,6 +56,7 @@ Todos están implementados. El 1 está implementado como "listo para conectar"
 sql/01_schema.sql   tablas, enums, RLS, process_sale(), daily_closing()
 sql/02_seed.sql     2 sucursales + catálogo de arranque
 sql/03_dashboard.sql tabla de gastos + dashboard_summary()
+sql/04_logo_y_unidades.sql  logo por sucursal + unidad de peso preferida
 sql/pruebas/        pruebas de aislamiento (ver sección 6) — 13 pruebas
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
 web/app.js          toda la lógica (17 secciones numeradas)
@@ -168,6 +169,20 @@ muestra nada.
   factura". Aplica a cualquier comprobante, recibo o impresión que se agregue
   en el futuro.
 - **Todo el texto en Arial**, tanto en pantalla como en lo que se imprime.
+- **El logo de la sucursal sale en el comprobante y en los reportes impresos.**
+  Se guarda como data URL dentro de `locations.logo_data_url`, NO en un bucket:
+  así viaja con el catálogo que la caja cachea y el comprobante sale con logo
+  aunque no haya internet, y la CSP (`img-src 'self' data:`) ya lo permite sin
+  abrirle la puerta a ningún dominio. La app lo reduce a 480px antes de
+  guardarlo y la base rechaza más de 300 KB.
+- **Los pesos SIEMPRE se guardan en gramos.** `locations.default_weight_unit`
+  solo cambia cómo se muestran y con qué unidad arrancan los campos. Si cada
+  tienda guardara en su unidad, cualquier reporte consolidado estaría sumando
+  peras con manzanas sin que se note. Para mostrar hay `fmtWeight()` (con la
+  otra unidad entre paréntesis) y `fmtWeightShort()`.
+- **Al cambiar la unidad, las filas de topping que ya están en pantalla
+  conservan la suya.** Es a propósito: reinterpretar "30" de gramos a onzas
+  multiplicaría el cobro por 28.
 - **Modo día y modo noche**, con la elección recordada en el navegador.
 - **La interfaz nunca menciona Supabase, `config.js` ni nada técnico.** El
   cliente final no tiene por qué saber con qué está hecho: cuando algo falla
@@ -207,6 +222,7 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/00_simulacion_supabase.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/01_schema.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/02_seed.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/03_dashboard.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/04_logo_y_unidades.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_aislamiento.sql
 ```
 

@@ -260,6 +260,9 @@ table.data tr.low-stock td { background: var(--danger-bg); }
   .modal-box { box-shadow: none; max-width: 100%; }
   #tab-reportes .card:not(.closing-card) { display: none !important; }
   .closing-print-head { display: block; margin-bottom: 10px; }
+  /* Al imprimir solo sale la pestaña que está abierta. */
+  .tab-panel:not(.active) { display: none !important; }
+  #dash-chart svg { max-width: 100%; }
   body { background: #fff; color: #000; }
   .card { box-shadow: none; border: none; }
 }
@@ -297,3 +300,20 @@ table.data tr.low-stock td { background: var(--danger-bg); }
 .chart-legend i.income  { background: var(--success); }
 .chart-legend i.expense { background: var(--danger); }
 .chart-legend i.avg     { background: var(--accent); height: 3px; border-radius: 0; }
+
+/* --- Logo de la empresa ---------------------------------------------------- */
+.logo-row { display: flex; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+.logo-preview {
+  width: 160px; min-height: 80px; display: flex; align-items: center;
+  justify-content: center; padding: 10px; border: 1px dashed var(--border);
+  border-radius: var(--radius-m); background: var(--surface-2);
+}
+.logo-preview img { max-width: 100%; max-height: 70px; display: block; }
+
+/* En el comprobante y en los reportes impresos el logo va arriba, centrado.
+   Fondo blanco siempre: se imprime en papel, no en la pantalla del modo noche. */
+.doc-logo { text-align: center; margin-bottom: 8px; }
+.doc-logo img { max-height: 56px; max-width: 70%; }
+@media print {
+  .doc-logo img { max-height: 48px; }
+}
