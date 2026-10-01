@@ -25,7 +25,7 @@
    Cómo publicar una versión nueva: sube CACHE_VERSION. Eso borra la caché
    anterior y obliga a bajar los archivos otra vez.
    =========================================================================== */
-const CACHE_VERSION = "tutis-v7";
+const CACHE_VERSION = "tutis-v8";
 
 const APP_SHELL = [
   "./",
@@ -38,6 +38,10 @@ const APP_SHELL = [
   "./icon-192.png",
   "./icon-512.png",
   "./manifest.webmanifest",
+  "./carnet.html",
+  "./carnet.css",
+  "./carnet.js",
+  "./vendor/qrcode.min.js",
 ];
 
 self.addEventListener("install", (event) => {

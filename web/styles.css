@@ -373,3 +373,41 @@ table.data tr.low-stock td { background: var(--danger-bg); }
 .chart-grid-2 > div { min-width: 0; }
 .chart-title { font-weight: 700; font-size: .92rem; margin-bottom: 2px; }
 .chart-sub   { color: var(--ink-soft); font-size: .8rem; margin-bottom: 8px; }
+
+/* ===========================================================================
+   FIDELIZACIÓN
+   =========================================================================== */
+.loyalty-box {
+  margin-top: 14px; padding: 12px; border: 1px solid var(--border);
+  border-radius: var(--radius-m); background: var(--surface-2);
+}
+.loyalty-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.loy-search { display: flex; gap: 8px; }
+.loy-search input { flex: 1; min-width: 0; }
+#loy-results { margin: 6px 0; }
+.loy-result {
+  display: flex; justify-content: space-between; align-items: center; width: 100%;
+  padding: 8px 10px; margin-top: 4px; border: 1px solid var(--border);
+  border-radius: var(--radius-s); background: var(--surface); color: var(--ink);
+  font-family: var(--font); font-size: .9rem; cursor: pointer; text-align: left;
+}
+.loy-result:hover { border-color: var(--accent); }
+.loy-card-mini {
+  display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center;
+  padding: 10px; border-radius: var(--radius-s); background: var(--surface);
+}
+.loy-name { font-weight: 700; }
+.loy-points { text-align: right; }
+.loy-points-num { font-size: 1.4rem; font-weight: 700; color: var(--accent); line-height: 1; }
+.btn.small { padding: 5px 10px; font-size: .82rem; }
+#loy-redeem { max-width: 110px; }
+.tt-discount span:last-child { color: var(--success); font-weight: 700; }
+.tt-points { color: var(--ink-soft); font-size: .85rem; }
+.loy-detail-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.loy-link-row { display: flex; gap: 8px; }
+.loy-link-row input { flex: 1; min-width: 0; font-size: .82rem; }
+#table-clientes tbody tr { cursor: pointer; }
+#table-clientes tbody tr:hover td { background: var(--surface-2); }
+#table-clientes tbody tr.sel td { background: var(--accent-soft); }
+.pts-gana  { color: var(--success); font-weight: 700; }
+.pts-canje { color: var(--danger);  font-weight: 700; }

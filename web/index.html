@@ -56,6 +56,7 @@
         <button class="tab-btn active" data-tab="venta">Venta</button>
         <button class="tab-btn" data-tab="inventario" data-min-role="gerente">Inventario</button>
         <button class="tab-btn" data-tab="toppings" data-min-role="gerente">Toppings</button>
+        <button class="tab-btn" data-tab="clientes" data-min-role="gerente">Clientes</button>
         <button class="tab-btn" data-tab="gastos" data-min-role="gerente">Gastos</button>
         <button class="tab-btn" data-tab="reportes" data-min-role="gerente">Reportes</button>
         <button class="tab-btn" data-tab="config" data-min-role="gerente">Configuración</button>
@@ -250,6 +251,48 @@
             <div class="ticket-totals" id="ticket-totals"></div>
             <div id="ticket-alerts" style="margin-top:10px;"></div>
 
+            <div class="loyalty-box" id="loyalty-box">
+              <div class="loyalty-head">
+                <strong>Cliente frecuente</strong>
+                <span class="hint" id="loy-offline-hint" hidden>Sin conexión: los puntos se suman al sincronizar, pero no se pueden canjear.</span>
+              </div>
+
+              <div id="loy-search-area">
+                <div class="loy-search">
+                  <input type="text" id="loy-q" placeholder="Carnet, teléfono o nombre" autocomplete="off">
+                  <button class="btn ghost" id="btn-loy-buscar" type="button">Buscar</button>
+                </div>
+                <div id="loy-results"></div>
+                <button class="btn ghost small" id="btn-loy-nuevo" type="button">+ Inscribir cliente nuevo</button>
+                <div id="loy-new-form" hidden>
+                  <div class="field stack"><label>Nombre completo</label><input id="loy-new-name" autocomplete="off"></div>
+                  <div class="field stack"><label>Teléfono</label><input id="loy-new-phone" type="tel" autocomplete="off"></div>
+                  <button class="btn primary" id="btn-loy-guardar" type="button">Inscribir</button>
+                  <p class="hint" id="loy-new-msg"></p>
+                </div>
+              </div>
+
+              <div id="loy-selected" hidden>
+                <div class="loy-card-mini">
+                  <div>
+                    <div class="loy-name" id="loy-sel-name"></div>
+                    <div class="hint" id="loy-sel-code"></div>
+                  </div>
+                  <div class="loy-points">
+                    <div class="loy-points-num" id="loy-sel-points"></div>
+                    <div class="hint">puntos</div>
+                  </div>
+                  <button class="icon-btn" id="btn-loy-quitar" type="button" title="Quitar cliente" aria-label="Quitar cliente">✕</button>
+                </div>
+                <div class="field" id="loy-redeem-row">
+                  <label for="loy-redeem">Canjear puntos</label>
+                  <input type="number" id="loy-redeem" min="0" step="1" value="0">
+                  <button class="btn ghost small" id="btn-loy-max" type="button">Máximo</button>
+                </div>
+                <p class="hint" id="loy-redeem-hint"></p>
+              </div>
+            </div>
+
             <details open style="margin-top:12px;">
               <summary style="cursor:pointer; font-weight:700; font-size:0.9rem;">Datos de venta</summary>
               <div class="field stack" style="margin-top:10px;"><label>Cliente</label><input type="text" id="inp-customer-name" placeholder="Consumidor final"></div>
@@ -325,6 +368,93 @@
       </div>
     </section>
 
+
+
+    <!-- ===================== CLIENTES ===================== -->
+    <section id="tab-clientes" class="tab-panel">
+
+      <div class="card">
+        <h2>Programa de puntos</h2>
+        <div class="sub">Los puntos son de la marca: se acumulan en una tienda y se canjean en la otra.</div>
+        <div class="kpi-grid" id="loy-kpis"></div>
+      </div>
+
+      <div class="card">
+        <h2>Clientes</h2>
+        <div class="loy-search">
+          <input type="text" id="cli-q" placeholder="Buscar por nombre, teléfono o carnet" autocomplete="off">
+          <button class="btn ghost" id="btn-cli-buscar" type="button">Buscar</button>
+        </div>
+        <div class="table-wrap" style="margin-top:10px;"><table class="data" id="table-clientes">
+          <thead><tr><th>Cliente</th><th>Teléfono</th><th>Carnet</th><th>Puntos</th><th>Visitas</th><th>Gastado</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <p class="hint" id="cli-count"></p>
+      </div>
+
+      <div class="card" id="cli-detail" hidden>
+        <div class="loy-detail-head">
+          <div>
+            <h2 id="cli-d-name"></h2>
+            <div class="sub" id="cli-d-meta"></div>
+          </div>
+          <div class="loy-points">
+            <div class="loy-points-num" id="cli-d-points"></div>
+            <div class="hint" id="cli-d-value"></div>
+          </div>
+        </div>
+
+        <div class="chart-grid-2" style="margin-top:12px;">
+          <div>
+            <div class="chart-title">Datos</div>
+            <div class="field stack"><label>Nombre</label><input id="cli-e-name"></div>
+            <div class="field stack"><label>Teléfono</label><input id="cli-e-phone" type="tel"></div>
+            <div class="field stack"><label>Correo</label><input id="cli-e-email" type="email"></div>
+            <div class="field stack"><label>Cumpleaños</label><input id="cli-e-birth" type="date"></div>
+            <div class="field"><label class="check"><input type="checkbox" id="cli-e-active"> Activo</label></div>
+            <button class="btn primary" id="btn-cli-guardar" type="button">Guardar datos</button>
+            <p class="hint" id="cli-e-msg"></p>
+          </div>
+          <div>
+            <div class="chart-title">Carnet digital</div>
+            <div class="chart-sub">Mándale este enlace por WhatsApp. Desde ahí lo agrega a su Apple Wallet o Google Wallet.</div>
+            <div class="loy-link-row">
+              <input type="text" id="cli-d-link" readonly>
+              <button class="btn ghost small" id="btn-cli-copiar" type="button">Copiar</button>
+            </div>
+
+            <div class="chart-title" style="margin-top:18px;">Ajustar puntos</div>
+            <div class="chart-sub">Para corregir un error o regalar puntos. Queda registrado con tu nombre y la razón.</div>
+            <div class="field"><label>Puntos</label><input type="number" id="cli-adj-pts" step="1" placeholder="+50 o -20"></div>
+            <div class="field stack"><label>Razón</label><input id="cli-adj-note" placeholder="Ej. Promoción de apertura"></div>
+            <button class="btn ghost" id="btn-cli-ajustar" type="button">Aplicar ajuste</button>
+            <p class="hint" id="cli-adj-msg"></p>
+          </div>
+        </div>
+
+        <h2 style="margin-top:18px;">Movimientos</h2>
+        <div class="sub" id="cli-h-sub"></div>
+        <div class="table-wrap"><table class="data" id="table-cli-hist">
+          <thead><tr><th>Fecha</th><th>Tienda</th><th>Movimiento</th><th>Puntos</th><th>Monto</th><th>Nota</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+
+      <div class="card" id="loy-rules-card" hidden>
+        <h2>Reglas del programa</h2>
+        <div class="sub">Solo el propietario las cambia. Aplican igual en todas las tiendas.</div>
+        <div class="field"><label class="check"><input type="checkbox" id="rule-activo"> Programa activo</label></div>
+        <div class="field"><label>Gastar esto da 1 punto</label><input type="number" id="rule-mpp" step="0.01" min="0.01"></div>
+        <p class="hint" style="margin-top:-6px;">Es el equivalente de un dólar. Cuando se mueva el tipo de cambio, actualízalo aquí.</p>
+        <div class="field"><label>Valor de cada punto</label><input type="number" id="rule-vp" step="0.01" min="0"></div>
+        <div class="field"><label>Compra mínima para ganar</label><input type="number" id="rule-min" step="1" min="0"></div>
+        <div class="field"><label>Puntos mínimos para canjear</label><input type="number" id="rule-cmin" step="1" min="0"></div>
+        <div class="field"><label>Descuento máximo por venta (%)</label><input type="number" id="rule-cmax" step="1" min="0" max="100"></div>
+        <div class="alert" id="rule-explain"></div>
+        <button class="btn primary" id="btn-rules-save" type="button">Guardar reglas</button>
+        <p class="hint" id="rule-msg"></p>
+      </div>
+    </section>
 
     <!-- ===================== GASTOS ===================== -->
     <section id="tab-gastos" class="tab-panel">

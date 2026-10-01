@@ -3,14 +3,19 @@
 --
 --  Correr DESPUÉS de 01..07. Es idempotente.
 --
---  CÓMO FUNCIONA EL PROGRAMA
+--  CÓMO FUNCIONA EL PROGRAMA  (regla del negocio, 2026-10-01)
+--    "Se entrega un lempira por cada dólar gastado, o su equivalente."
+--
 --    · Cada cliente tiene un código de carnet (el del QR). Con ese código se
 --      le encuentra en la caja, y es lo que va dentro del pase de Apple
 --      Wallet y Google Wallet.
---    · Gana puntos por lo que gasta: `puntos_por_moneda` puntos por cada
---      unidad de moneda. Con 0.10, cien lempiras dan diez puntos.
---    · Canjea puntos como descuento: cada punto vale `valor_punto` en dinero.
---      Con 0.50, diez puntos son cinco lempiras de descuento.
+--    · Gana 1 punto por cada `monto_por_punto` lempiras que gasta. Ese monto
+--      es el equivalente de un dólar: con el dólar a L 27, una compra de
+--      L 87.75 da 3 puntos.
+--    · Cada punto vale `valor_punto` al canjearlo: L 1.00. Para la clienta es
+--      lo más claro que puede ser — sus puntos SON lempiras.
+--    · Cuando se mueva el dólar, se cambia `monto_por_punto` y listo. No se
+--      actualiza solo a propósito: es una decisión comercial, no un cálculo.
 --
 --  DECISIÓN DE ALCANCE (la pidió el dueño, 2026-10-01)
 --    Los puntos son de LA MARCA, no de la tienda: se acumulan en Galerías y
@@ -35,10 +40,11 @@
 create table if not exists public.loyalty_config (
   id                 boolean primary key default true check (id),
   activo             boolean not null default true,
-  -- Cuántos puntos da cada unidad de moneda gastada. 0.10 = 1 punto por cada 10.
-  puntos_por_moneda  numeric(10,4) not null default 0.10 check (puntos_por_moneda >= 0),
-  -- Cuánto vale cada punto al canjearlo. 0.50 = medio lempira por punto.
-  valor_punto        numeric(10,4) not null default 0.50 check (valor_punto >= 0),
+  -- Cuántos lempiras hay que gastar para ganar UN punto: el equivalente de un
+  -- dólar. Referencia BCH al 2026-10-01: L 26.90 compra / L 27.03 venta.
+  monto_por_punto    numeric(10,2) not null default 27.00 check (monto_por_punto > 0),
+  -- Cuánto vale cada punto al canjearlo. 1.00 = un punto es un lempira.
+  valor_punto        numeric(10,4) not null default 1.00 check (valor_punto >= 0),
   -- Mínimos, para que el programa no se vuelva ingobernable.
   compra_minima      numeric(10,2) not null default 0  check (compra_minima >= 0),
   canje_minimo       integer       not null default 20 check (canje_minimo >= 0),
@@ -47,6 +53,12 @@ create table if not exists public.loyalty_config (
   canje_max_pct      numeric(5,2)  not null default 50 check (canje_max_pct between 0 and 100),
   actualizado_en     timestamptz   not null default now()
 );
+
+-- Por si este archivo corre sobre una base donde existía la versión anterior
+-- de las reglas (puntos_por_moneda): se agrega la columna nueva y se quita la
+-- vieja. En una base nueva estas dos líneas no hacen nada.
+alter table public.loyalty_config add column if not exists monto_por_punto numeric(10,2) not null default 27.00;
+alter table public.loyalty_config drop column if exists puntos_por_moneda;
 
 insert into public.loyalty_config (id) values (true) on conflict (id) do nothing;
 
@@ -539,7 +551,10 @@ begin
   -- --- Fidelización ---------------------------------------------------------
   select * into v_cfg from public.loyalty_config where id;
 
-  if v_cliente is not null and v_cfg.activo then
+  -- Esta revisión va SIEMPRE que venga un cliente, esté o no activo el
+  -- programa: si el cliente ya no existe, la venta chocaría con la llave
+  -- foránea de sales.customer_id y se perdería igual.
+  if v_cliente is not null then
     -- Se bloquea la fila del cliente hasta el final de la transacción. Sin
     -- esto, dos cajas cobrándole al mismo cliente a la vez podrían canjear
     -- ambas el mismo saldo.
@@ -547,8 +562,21 @@ begin
      where id = v_cliente and active for update;
 
     if v_saldo is null then
-      raise exception 'El cliente del carnet no existe o está inactivo';
+      -- Si pedía CANJEAR, sí se rechaza: eso solo pasa en línea y la cajera
+      -- tiene que enterarse antes de cobrar.
+      if v_pide_canje > 0 then
+        raise exception 'El cliente del carnet no existe o está inactivo';
+      end if;
+      -- Si solo iba a GANAR puntos, la venta se registra igual, sin cliente.
+      -- Es el caso de una venta cobrada sin internet cuyo cliente fue
+      -- desactivado antes de sincronizar: la cola de envío descarta los
+      -- rechazos, y una venta que sí ocurrió no se puede perder por culpa
+      -- de los puntos.
+      v_cliente := null;
     end if;
+  end if;
+
+  if v_cliente is not null and v_cfg.activo then
 
     if v_pide_canje > 0 then
       if v_saldo < v_cfg.canje_minimo then
@@ -574,7 +602,9 @@ begin
     -- programa se alimentaría a sí mismo.
     v_total_final := v_tot_precio - v_descuento;
     if v_total_final >= v_cfg.compra_minima then
-      v_gana := floor(v_total_final * v_cfg.puntos_por_moneda)::int;
+      -- floor: un punto por cada dólar COMPLETO gastado. L 50 con el dólar a
+      -- L 27 da 1 punto, no 1.85.
+      v_gana := floor(v_total_final / v_cfg.monto_por_punto)::int;
     end if;
   else
     v_total_final := v_tot_precio;

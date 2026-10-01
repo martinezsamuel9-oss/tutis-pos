@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mi carnet Tuti's</title>
+<meta name="theme-color" content="#C97A25">
+<link rel="icon" href="logo.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="stylesheet" href="carnet.css">
+</head>
+<body>
+<main class="wrap">
+  <div class="card" id="card" aria-live="polite">
+    <div class="card-top">
+      <img class="card-logo" src="logo.png" alt="Tuti's">
+      <span class="card-kicker">Cliente frecuente</span>
+    </div>
+
+    <div class="card-name" id="c-name">&nbsp;</div>
+
+    <div class="card-points">
+      <div><span class="pts" id="c-points">—</span> <span class="pts-label">puntos</span></div>
+      <div class="pts-value" id="c-value"></div>
+    </div>
+
+    <div class="qr" id="c-qr" role="img" aria-label="Código QR del carnet"></div>
+    <div class="code" id="c-code"></div>
+    <p class="hint">Muéstralo en caja para sumar o canjear puntos.</p>
+  </div>
+
+  <div class="wallets" id="wallets" hidden>
+    <a class="wallet-btn apple" id="btn-apple" href="#" hidden>Agregar a Apple Wallet</a>
+    <a class="wallet-btn google" id="btn-google" href="#" hidden>Agregar a Google Wallet</a>
+  </div>
+
+  <p class="foot" id="c-foot"></p>
+</main>
+
+<script src="config.js"></script>
+<script src="vendor/supabase.min.js"></script>
+<script src="vendor/qrcode.min.js"></script>
+<script src="carnet.js"></script>
+</body>
+</html>

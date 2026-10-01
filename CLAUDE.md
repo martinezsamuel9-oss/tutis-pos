@@ -60,14 +60,18 @@ sql/04_logo_y_unidades.sql  logo por sucursal + unidad de peso preferida
 sql/05_endurecimiento.sql   validación en process_sale + rastro de auditoría
 sql/06_ventas_por_hora.sql  dashboard_summary devuelve además ventas por hora
 sql/07_cierre_automatico.sql daily_closing_all() + bitácora de correos
+sql/08_fidelizacion.sql     clientes, puntos, canje y carnet público
 cierre-diario/      Worker programado que manda el cierre (ver su LEEME.md)
 sql/pruebas/        prueba_aislamiento.sql (13) + prueba_seguridad.sql (48 ataques)
+                    + prueba_fidelizacion.sql (19)
                     + datos_de_demostracion.sql (14 días de ventas, borrables)
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
 web/app.js          toda la lógica (17 secciones numeradas)
 web/styles.css      estilos, modo día/noche
 web/config.js       credenciales — ÚNICO archivo que el dueño edita
 web/sw.js           service worker: app shell offline
+web/carnet.html     carnet digital PÚBLICO de la clienta (+ carnet.js/.css)
+web/vendor/qrcode.min.js  qrcode-generator 2.0.4 (MIT), servido local por la CSP
 web/_headers        cabeceras de seguridad (CSP, etc.) que aplica Cloudflare
 web/vendor/         SDK de Supabase servido localmente, NO desde CDN
 wrangler.jsonc      despliegue + subdominio tutis.slabblu.com
@@ -126,9 +130,9 @@ Cada una resuelve un problema concreto; revertirlas rompe algo:
 
 | Rol | Alcance | Puede |
 |---|---|---|
-| `cajera` | solo su sucursal | cobrar (vía RPC), ver catálogo |
-| `gerente` | solo su sucursal | todo lo anterior + dashboard, gastos, inventario, toppings, precios, reportes, configuración de SU tienda |
-| `propietario` | todas | todo + crear sucursales + asignar roles y tiendas |
+| `cajera` | solo su sucursal | cobrar (vía RPC), ver catálogo, inscribir y buscar clientes, canjear puntos |
+| `gerente` | solo su sucursal | todo lo anterior + dashboard, gastos, clientes y ajustes de puntos, inventario, toppings, precios, reportes, configuración de SU tienda |
+| `propietario` | todas | todo + crear sucursales + asignar roles y tiendas + reglas del programa de puntos |
 
 `profiles.location_id` es NULL solo para el propietario. Un usuario sin
 sucursal asignada (y que no sea propietario) no puede entrar — es intencional,
@@ -137,6 +141,52 @@ para que nadie vea datos por accidente al registrarse.
 **Regla dura del cliente**: Tuti's Galerías no ve NADA de Tuti's Multiplaza, y
 viceversa. Solo el dueño ve ambas, y necesita reportes **por tienda**, no solo
 consolidados.
+
+## 3.0 Fidelización (puntos y carnet)
+
+**La regla del negocio (2026-10-01): "se entrega un lempira por cada dólar
+gastado, o su equivalente".** Se modela con dos números, no con una fracción:
+
+- `monto_por_punto` — lempiras que hay que gastar para ganar 1 punto. Es el
+  equivalente del dólar (L 27 al arrancar). **No se actualiza solo con el
+  tipo de cambio, a propósito**: es una decisión comercial.
+- `valor_punto` — lo que vale un punto al canjearlo: L 1. Para la clienta,
+  sus puntos SON lempiras.
+
+Lo que no hay que deshacer:
+
+1. **Los puntos son de la marca, no de la tienda** (lo decidió el dueño). Es la
+   ÚNICA excepción al aislamiento entre sucursales: `customers` se comparte
+   (nombre y saldo), pero `loyalty_transactions` lleva `location_id` y cada
+   gerente solo ve los movimientos de SU tienda. Nadie ve ventas de la otra.
+2. **`points_balance` tiene el UPDATE revocado a nivel de columna.** Solo lo
+   mueven las funciones; cada movimiento queda en `loyalty_transactions`. El
+   saldo es un caché del libro, y `prueba_fidelizacion.sql` P11 lo cuadra.
+3. **La pantalla manda CUÁNTOS PUNTOS canjear, nunca cuánto dinero.** El
+   descuento lo calcula `process_sale` con `valor_punto`. El tope (50% de la
+   venta por defecto) se recalcula en el servidor aunque la pantalla ya lo
+   haya consultado.
+4. **Los puntos se ganan sobre lo PAGADO, no sobre el precio de lista.** Si no,
+   canjear puntos generaría puntos nuevos.
+5. **Canjear requiere internet; ganar, no.** Una venta sin conexión viaja con
+   el cliente pero sin canje. Si se permitiera canjear offline y la clienta
+   gastara esos puntos en la otra tienda antes de sincronizar, el servidor
+   rechazaría la venta y la cola la descartaría: se perdería una venta real.
+6. **Los puntos NUNCA tumban una venta.** Si el cliente de una venta ya no
+   existe o está inactivo y la venta solo iba a ganar puntos, se registra sin
+   cliente en vez de rechazarse (pruebas P12). Solo se rechaza si pedía
+   canjear, porque eso pasa en línea y la cajera tiene que enterarse.
+7. **`loyalty_carnet()` es la única función del sistema que puede llamar
+   `anon`.** El carnet se abre desde el teléfono de la clienta, que no tiene
+   usuario. El código de 10 caracteres hace de llave, por eso devuelve solo
+   nombre de pila, saldo y su valor — nunca teléfono, correo ni historial.
+8. **El código del carnet no usa O, 0, I, 1 ni L.** Se dicta en voz alta.
+9. **El QR codifica SOLO el código, no la URL.** Es lo que teclea un lector de
+   códigos de barras en la caja, y lo que va en los pases de Wallet. La caja
+   igual acepta la URL completa pegada (`codigoDesdeTexto()`).
+10. **`carnet.css` necesita su propia regla `[hidden] { display:none !important }`.**
+    Es una hoja aparte de la caja; sin ella los botones de Wallet aparecían
+    aunque el servicio de pases no existiera, apuntando a `#`.
 
 ## 3.1 Dashboard y gastos
 
@@ -312,8 +362,12 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/02_seed.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/03_dashboard.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/04_logo_y_unidades.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/05_endurecimiento.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/06_ventas_por_hora.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/07_cierre_automatico.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/08_fidelizacion.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_aislamiento.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_seguridad.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_fidelizacion.sql
 ```
 
 `00_simulacion_supabase.sql` recrea lo que Supabase ya trae (schema `auth`,

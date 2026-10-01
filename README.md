@@ -49,6 +49,8 @@ computadoras de las tiendas: se abre en el navegador.
    pico). **Run**.
 8. Nueva consulta, ahora con `sql/07_cierre_automatico.sql` (el envío
    automático del cierre). **Run**.
+9. Nueva consulta, ahora con `sql/08_fidelizacion.sql` (clientes, puntos y
+   carnet digital). **Run**.
 
 ### Paso 3 — Crear tu usuario y volverte propietario
 
@@ -169,6 +171,32 @@ Dos gráficas: **en qué se va el dinero** (por categoría) y **cuándo se gasta
 
 Todo cambio a un gasto queda en el rastro de auditoría, y quién lo registró lo
 pone el servidor, no la pantalla: nadie puede firmar un gasto a nombre de otro.
+
+## Clientes frecuentes y puntos
+
+**La regla: por cada dólar que gasta (≈ L 27) el cliente recibe L 1 en
+puntos.** Un punto vale un lempira. Con el dólar a L 27, se le devuelve el
+3.7 % de lo que gasta.
+
+**En la caja:** antes de cobrar, se pasa el carnet por el lector (o se busca
+por teléfono o nombre). Si es cliente nuevo, se inscribe ahí mismo con nombre
+y teléfono. Para canjear, "Máximo" pone lo que permite la venta. El ticket
+muestra el descuento, lo que hay que cobrar y los puntos que va a ganar.
+
+- Los puntos se acumulan en una tienda y se canjean en la otra.
+- Para canjear necesita al menos 20 puntos, y el descuento nunca pasa del 50 %
+  de la venta.
+- **Sin internet se pueden ganar puntos pero no canjearlos.** Los puntos de una
+  venta sin conexión se suman solos al volver la red.
+
+**Pestaña Clientes** (gerente y propietario): la lista, cuánto ha gastado cada
+uno, sus movimientos, y el ajuste manual de puntos — que siempre pide una
+razón y queda registrado con tu nombre. El propietario cambia ahí las reglas.
+Cuando se mueva el dólar, actualizas "Gastar esto da 1 punto".
+
+**El carnet digital:** cada cliente tiene un enlace propio (está en su ficha,
+con un botón para copiarlo). Se le manda por WhatsApp; al abrirlo ve su nombre,
+sus puntos y su QR. El QR funciona en caja aunque su teléfono no tenga señal.
 
 ## El cierre llega solo por correo
 
@@ -294,6 +322,7 @@ tutis-web/
     05_endurecimiento.sql   Validaciones de seguridad y rastro de auditoría
     06_ventas_por_hora.sql  Ventas por hora, para la gráfica de horas pico
     07_cierre_automatico.sql El cierre de todas las tiendas, para el correo
+    08_fidelizacion.sql      Clientes, puntos y carnet digital
   cierre-diario/      Envío automático del cierre (tiene su propio LEEME.md)
     pruebas/          Pruebas de aislamiento en un PostgreSQL local
   web/                <- esta carpeta es la que se publica

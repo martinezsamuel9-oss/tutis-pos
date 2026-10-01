@@ -226,8 +226,8 @@ function updateConnBadge() {
   }
 }
 
-window.addEventListener("online", () => { updateConnBadge(); syncPending(); });
-window.addEventListener("offline", updateConnBadge);
+window.addEventListener("online", () => { updateConnBadge(); syncPending(); if (typeof pintarClienteSeleccionado === "function") pintarClienteSeleccionado(); });
+window.addEventListener("offline", () => { updateConnBadge(); if (typeof pintarClienteSeleccionado === "function") pintarClienteSeleccionado(); });
 setInterval(() => { if (navigator.onLine && STATE.pending.length) syncPending(); }, 60000);
 
 /* ===========================================================================
@@ -434,6 +434,7 @@ async function loadData() {
     }
 
     cacheCatalog();
+    await cargarReglasFidelizacion();
   } catch (e) {
     console.error("No se pudo cargar del servidor, usando copia local:", e);
     loadFromCache();
@@ -493,6 +494,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     // alguien lo abre. Después se refresca solo al cambiar los filtros.
     if (btn.dataset.tab === "dashboard" && !DASH.loaded) loadDashboard();
     if (btn.dataset.tab === "gastos" && !GAS.loaded) cargarGastos();
+    if (btn.dataset.tab === "clientes") { llenarReglas(); if (!CLI.loaded) cargarClientes(""); }
   });
 });
 
@@ -673,6 +675,147 @@ function buildPlan() {
   };
 }
 
+/* --- Cliente frecuente -----------------------------------------------------
+   Ganar puntos funciona sin internet: el id del cliente viaja en la venta y
+   el servidor los suma al sincronizar. CANJEAR no: si se canjeara sin
+   conexión y mientras tanto la clienta gastara esos puntos en la otra
+   tienda, el servidor rechazaría la venta entera al sincronizar, y la cola
+   trata ese rechazo como definitivo — se perdería el registro de una venta
+   que sí ocurrió. No se puede gastar un saldo que no se puede verificar. */
+const LOY = { cliente: null, cfg: null, maxPuntos: 0, maxDescuento: 0 };
+
+async function cargarReglasFidelizacion() {
+  if (!sb || !navigator.onLine) return;
+  const { data } = await sb.from("loyalty_config").select("*").maybeSingle();
+  if (data) { LOY.cfg = data; lsSet("tutis_loyalty_cfg", data); }
+}
+function reglasFidelizacion() {
+  return LOY.cfg || lsGet("tutis_loyalty_cfg", null);
+}
+
+function pintarClienteSeleccionado() {
+  const c = LOY.cliente;
+  $("loy-search-area").hidden = !!c;
+  $("loy-selected").hidden = !c;
+  const sinRed = !navigator.onLine;
+  $("loy-offline-hint").hidden = !sinRed;
+  if (!c) { renderQuote(); return; }
+  $("loy-sel-name").textContent = c.full_name;
+  $("loy-sel-code").textContent = `Carnet ${c.card_code}`;
+  $("loy-sel-points").textContent = c.points_balance;
+  $("loy-redeem-row").hidden = sinRed;
+  renderQuote();
+}
+
+// Si lo que llega es el enlace completo del carnet (alguien lo escaneó con
+// la cámara y lo pegó), se saca el código del ?c=. Un lector de códigos de
+// barras USB o Bluetooth "teclea" el código y da Enter, y eso ya busca solo.
+function codigoDesdeTexto(t) {
+  const m = /[?&]c=([A-Za-z0-9]+)/.exec(t);
+  return m ? m[1].toUpperCase() : t;
+}
+
+async function buscarCliente() {
+  const q = codigoDesdeTexto($("loy-q").value.trim());
+  const box = $("loy-results");
+  if (q.length < 3) { box.innerHTML = '<p class="hint">Escribe al menos 3 caracteres.</p>'; return; }
+  if (!navigator.onLine) { box.innerHTML = '<p class="hint">Sin conexión no se puede buscar clientes.</p>'; return; }
+  box.innerHTML = '<p class="hint">Buscando…</p>';
+  const { data, error } = await sb.rpc("loyalty_buscar", { p_texto: q });
+  if (error) { box.innerHTML = `<p class="hint">${esc(error.message)}</p>`; return; }
+  const lista = data || [];
+  if (!lista.length) { box.innerHTML = '<p class="hint">No hay nadie con ese dato. Puedes inscribirlo abajo.</p>'; return; }
+  // Un código de carnet exacto identifica a una sola persona: se selecciona
+  // de una vez. Es lo que hace instantáneo pasar el QR por el lector.
+  const exacto = lista.find((c) => c.card_code.toUpperCase() === q.toUpperCase());
+  if (exacto) { seleccionarCliente(exacto); return; }
+  box.innerHTML = "";
+  lista.forEach((c) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "loy-result";
+    b.innerHTML = `<span><strong>${esc(c.full_name)}</strong><br><span class="hint">${esc(c.phone || "")} · ${esc(c.card_code)}</span></span>
+                   <span class="num"><strong>${esc(c.points_balance)}</strong> pts</span>`;
+    b.addEventListener("click", () => seleccionarCliente(c));
+    box.appendChild(b);
+  });
+}
+
+function seleccionarCliente(c) {
+  LOY.cliente = c;
+  $("loy-redeem").value = "0";
+  $("loy-results").innerHTML = "";
+  $("loy-q").value = "";
+  pintarClienteSeleccionado();
+}
+
+function quitarCliente() {
+  LOY.cliente = null; LOY.maxPuntos = 0; LOY.maxDescuento = 0;
+  $("loy-redeem").value = "0";
+  $("loy-redeem-hint").textContent = "";
+  pintarClienteSeleccionado();
+}
+
+$("btn-loy-buscar").addEventListener("click", buscarCliente);
+$("loy-q").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); buscarCliente(); } });
+$("btn-loy-quitar").addEventListener("click", quitarCliente);
+$("btn-loy-nuevo").addEventListener("click", () => {
+  const f = $("loy-new-form"); f.hidden = !f.hidden;
+  if (!f.hidden) $("loy-new-name").focus();
+});
+
+$("btn-loy-guardar").addEventListener("click", async () => {
+  const msg = $("loy-new-msg");
+  const nombre = $("loy-new-name").value.trim();
+  const tel = $("loy-new-phone").value.trim();
+  if (nombre.length < 2) { msg.textContent = "Escribe el nombre completo."; return; }
+  if (!navigator.onLine) { msg.textContent = "Sin conexión no se puede inscribir. Cobra normal y lo inscribes después."; return; }
+  const btn = $("btn-loy-guardar"); btn.disabled = true;
+  const { data, error } = await sb.rpc("loyalty_registrar", { p_full_name: nombre, p_phone: tel || null });
+  btn.disabled = false;
+  if (error) { msg.textContent = error.message; return; }
+  msg.textContent = "";
+  $("loy-new-name").value = ""; $("loy-new-phone").value = "";
+  $("loy-new-form").hidden = true;
+  seleccionarCliente(data);
+});
+
+// El tope de canje lo decide el servidor. Aquí solo se le pregunta para
+// mostrarle a la cajera la cifra real antes de cobrar.
+let canjeTimer = null;
+async function consultarTopeCanje(total) {
+  if (!LOY.cliente || !navigator.onLine) { LOY.maxPuntos = 0; LOY.maxDescuento = 0; return; }
+  const { data } = await sb.rpc("loyalty_canje_maximo",
+    { p_customer_id: LOY.cliente.id, p_total: total });
+  LOY.maxPuntos = (data && data.puntos) || 0;
+  LOY.maxDescuento = (data && data.descuento) || 0;
+  $("loy-redeem-hint").textContent = data && data.motivo
+    ? data.motivo
+    : `Puede canjear hasta ${LOY.maxPuntos} puntos (${money(LOY.maxDescuento)}) en esta venta.`;
+  const pedido = parseInt($("loy-redeem").value, 10) || 0;
+  if (pedido > LOY.maxPuntos) $("loy-redeem").value = String(LOY.maxPuntos);
+}
+$("loy-redeem").addEventListener("input", () => renderQuote());
+$("btn-loy-max").addEventListener("click", () => {
+  $("loy-redeem").value = String(LOY.maxPuntos || 0);
+  renderQuote();
+});
+
+// Lo que se ve en el ticket ANTES de cobrar. Es una vista previa con las
+// mismas reglas del servidor; la cifra que manda es la que devuelve
+// process_sale, y es la que sale en el comprobante.
+function previaFidelizacion(totalLista) {
+  const cfg = reglasFidelizacion();
+  if (!LOY.cliente || !cfg || !cfg.activo) return null;
+  const pedido = navigator.onLine ? Math.max(0, parseInt($("loy-redeem").value, 10) || 0) : 0;
+  const canje = Math.min(pedido, LOY.maxPuntos || 0, LOY.cliente.points_balance);
+  const descuento = Math.min(r2(canje * Number(cfg.valor_punto)), totalLista);
+  const pagado = r2(totalLista - descuento);
+  // Un punto por cada dólar COMPLETO gastado, igual que en el servidor.
+  const mpp = Number(cfg.monto_por_punto) || 0;
+  const gana = (pagado >= Number(cfg.compra_minima) && mpp > 0) ? Math.floor(pagado / mpp) : 0;
+  return { canje, descuento, pagado, gana };
+}
+
 function renderQuote() {
   const plan = buildPlan();
   const linesEl = $("ticket-lines"), totalsEl = $("ticket-totals"), alertsEl = $("ticket-alerts");
@@ -709,11 +852,37 @@ function renderQuote() {
     <div><span>Margen</span><span class="num">${money(result.margin)} (${result.margin_pct}%)</span></div>
     <div class="tt-total"><span>Total</span><span class="num">${money(result.total_price)}</span></div>`;
 
+  // El tope depende del total, así que se vuelve a preguntar cuando cambia,
+  // con una pequeña espera para no golpear al servidor en cada tecla.
+  if (LOY.cliente && navigator.onLine) {
+    clearTimeout(canjeTimer);
+    canjeTimer = setTimeout(() => consultarTopeCanje(result.total_price).then(() => {
+      const p2 = previaFidelizacion(result.total_price);
+      pintarPreviaPuntos(p2, result.total_price);
+    }), 350);
+  }
+  pintarPreviaPuntos(previaFidelizacion(result.total_price), result.total_price);
+
   const alerts = [...result.alerts];
   if (usingScale && Math.abs(scaleTotalG - result.gross_weight_g) > 0.5) {
     alerts.unshift(`La báscula marca ${fmtWeightShort(scaleTotalG)}, pero vaso + helado + toppings registrados suman ${fmtWeightShort(result.gross_weight_g)} (diferencia de ${fmtWeightShort(Math.abs(scaleTotalG - result.gross_weight_g))}). Revisa antes de cobrar.`);
   }
   alertsEl.innerHTML = alerts.map((a) => `<div class="alert warn">${esc(a)}</div>`).join("");
+}
+
+function pintarPreviaPuntos(p, totalLista) {
+  const el = $("ticket-totals");
+  el.querySelectorAll(".tt-discount, .tt-points, .tt-pay").forEach((n) => n.remove());
+  if (!p) return;
+  if (p.descuento > 0) {
+    el.insertAdjacentHTML("beforeend",
+      `<div class="tt-discount"><span>Descuento por ${p.canje} ${p.canje === 1 ? "punto" : "puntos"}</span><span class="num">− ${money(p.descuento)}</span></div>` +
+      `<div class="tt-total tt-pay"><span>A cobrar</span><span class="num">${money(p.pagado)}</span></div>`);
+  }
+  if (p.gana > 0) {
+    el.insertAdjacentHTML("beforeend",
+      `<div class="tt-points"><span>Gana con esta compra</span><span class="num">+${p.gana} ${p.gana === 1 ? "punto" : "puntos"}</span></div>`);
+  }
 }
 
 $("btn-charge").addEventListener("click", () => chargeSale(false));
@@ -751,12 +920,33 @@ async function chargeSale(force) {
     lines: result.lines,
   };
 
-  let folio = null, offline = false;
+  // Al servidor se le dice QUÉ cliente y CUÁNTOS PUNTOS quiere canjear. El
+  // descuento en dinero lo calcula él: si viniera de aquí, cualquiera con la
+  // consola abierta se regalaría el helado.
+  if (LOY.cliente) {
+    payload.customer_id = LOY.cliente.id;
+    if (!payload.customer_name) payload.customer_name = LOY.cliente.full_name;
+    const previa = previaFidelizacion(result.total_price);
+    if (previa && previa.canje > 0 && navigator.onLine) payload.redeem_points = previa.canje;
+  }
+
+  let folio = null, offline = false, servidor = null;
   try {
     if (!navigator.onLine) throw new Error("offline");
     const { data, error } = await sb.rpc("process_sale", { payload });
-    if (error) throw error;
+    if (error) {
+      // Un rechazo por puntos (saldo insuficiente, tope) no es un problema de
+      // red: la venta NO entró. Se avisa y no se manda a la cola, porque
+      // reintentarla daría el mismo rechazo una y otra vez.
+      if (payload.redeem_points && /punto|canje/i.test(error.message || "")) {
+        btn.disabled = false;
+        alert(`No se pudo canjear: ${error.message}\n\nQuita el canje o ajústalo y vuelve a cobrar.`);
+        return;
+      }
+      throw error;
+    }
     folio = data && data.folio;
+    servidor = data;
   } catch (e) {
     // La venta ya ocurrió físicamente: el cliente pagó y se llevó su helado.
     // Así que nunca la perdemos — se guarda aquí y se envía sola al volver la red.
@@ -765,8 +955,9 @@ async function chargeSale(force) {
     queueSale(payload);
   }
 
-  showReceipt(payload, result, folio, offline);
+  showReceipt(payload, result, folio, offline, servidor);
   discountLocalStock(plan, result);
+  if (LOY.cliente) quitarCliente();
 
   $("inp-ice-weight").value = "";
   $("inp-total-weight").value = "";
@@ -800,7 +991,7 @@ function discountLocalStock(plan, result) {
   cacheCatalog();
 }
 
-function showReceipt(payload, result, folio, offline) {
+function showReceipt(payload, result, folio, offline, servidor) {
   const loc = activeLocation();
   const TAX = { GT: { doc: "Factura Electrónica en Línea (FEL)", id: "NIT" },
                 SV: { doc: "Documento Tributario Electrónico (DTE)", id: "NIT/DUI" },
@@ -827,14 +1018,31 @@ Cliente: ${esc(payload.customer_name || "Consumidor Final")}
 ${items}
 ------------------------------
 PESO TOTAL: ${fmtWeight(result.gross_weight_g)}
-TOTAL: ${money(result.total_price)}
-------------------------------
+${bloquePuntosRecibo(payload, result, servidor, offline)}------------------------------
 NO ES UNA FACTURA FISCAL VÁLIDA — pendiente de
 conexión con proveedor certificado.
 ${offline ? "\n** Registrada sin conexión — se enviará al\n   servidor cuando vuelva el internet. **" : ""}
 </div>`;
   $("receipt-modal").hidden = false;
 }
+// Las cifras de puntos del comprobante son las que devolvió el servidor, no
+// la vista previa: es lo que quedó registrado.
+function bloquePuntosRecibo(payload, result, servidor, offline) {
+  if (!payload.customer_id) return `TOTAL: ${money(result.total_price)}\n`;
+  if (offline || !servidor) {
+    return `TOTAL: ${money(result.total_price)}\n` +
+           `Cliente frecuente: los puntos de esta compra\nse suman al sincronizar.\n`;
+  }
+  let t = "";
+  if (Number(servidor.discount) > 0) {
+    t += `Subtotal: ${money(result.total_price)}\n`;
+    t += `Canje ${servidor.points_redeemed} pts: -${money(servidor.discount)}\n`;
+  }
+  t += `TOTAL: ${money(servidor.total != null ? servidor.total : result.total_price)}\n`;
+  if (Number(servidor.points_earned) > 0) t += `Puntos ganados: +${servidor.points_earned}\n`;
+  return t;
+}
+
 $("btn-close-receipt").addEventListener("click", () => { $("receipt-modal").hidden = true; });
 $("btn-print-receipt").addEventListener("click", () => window.print());
 
@@ -2332,6 +2540,226 @@ function renderDashToppings() {
   });
 }
 
+
+
+/* ===========================================================================
+   CLIENTES Y PROGRAMA DE PUNTOS
+   ---------------------------------------------------------------------------
+   Los clientes son de la marca (los puntos se canjean en cualquier tienda),
+   pero los MOVIMIENTOS siguen aislados: cada gerente ve los de su sucursal.
+   Eso lo hace cumplir la base; esta pantalla solo muestra lo que llega.
+
+   El saldo nunca se edita aquí: no hay un campo para eso. Para mover puntos
+   a mano está el ajuste, que exige razón y queda con nombre en el libro.
+   =========================================================================== */
+const CLI = { lista: [], sel: null, loaded: false };
+const MOV_LABELS = { gana: "Ganó", canje: "Canjeó", ajuste: "Ajuste", vence: "Venció" };
+
+// La dirección del carnet. Usa el mismo sitio en el que está abierta la caja,
+// así no hay que configurarla en ningún lado.
+function urlCarnet(codigo) {
+  return `${location.origin}${location.pathname.replace(/[^/]*$/, "")}carnet.html?c=${encodeURIComponent(codigo)}`;
+}
+
+async function cargarClientes(texto) {
+  if (!canManage() || !navigator.onLine) return;
+  let q = sb.from("customers")
+            .select("id, card_code, full_name, phone, email, birth_date, points_balance, total_spent, visits, active, created_at")
+            .order("full_name").limit(200);
+  const t = (texto || "").trim();
+  if (t) {
+    const like = `%${t.replace(/[%,()]/g, "")}%`;
+    q = q.or(`full_name.ilike.${like},phone.ilike.${like},card_code.ilike.${like}`);
+  }
+  const { data, error } = await q;
+  if (error) { $("cli-count").textContent = `No se pudieron cargar: ${error.message}`; return; }
+  CLI.lista = data || [];
+  CLI.loaded = true;
+  pintarClientes();
+  pintarKpisFidelizacion();
+}
+
+function pintarClientes() {
+  const body = document.querySelector("#table-clientes tbody");
+  body.innerHTML = CLI.lista.length ? "" :
+    '<tr><td colspan="6" class="hint">Todavía no hay clientes inscritos. Se inscriben desde la pantalla de Venta.</td></tr>';
+  CLI.lista.forEach((c) => {
+    const tr = document.createElement("tr");
+    if (CLI.sel && CLI.sel.id === c.id) tr.classList.add("sel");
+    tr.innerHTML = `<td>${esc(c.full_name)}${c.active ? "" : ' <span class="hint">(inactivo)</span>'}</td>
+      <td>${esc(c.phone || "")}</td>
+      <td><code>${esc(c.card_code)}</code></td>
+      <td class="num"><strong>${esc(c.points_balance)}</strong></td>
+      <td class="num">${esc(c.visits)}</td>
+      <td class="num">${money(c.total_spent)}</td>`;
+    tr.addEventListener("click", () => abrirCliente(c.id));
+    body.appendChild(tr);
+  });
+  $("cli-count").textContent = CLI.lista.length ? `${CLI.lista.length} cliente(s)` : "";
+}
+
+function pintarKpisFidelizacion() {
+  const cfg = reglasFidelizacion();
+  const activos = CLI.lista.filter((c) => c.active);
+  const saldo = activos.reduce((a, c) => a + Number(c.points_balance || 0), 0);
+  const vp = cfg ? Number(cfg.valor_punto) : 0;
+  const kpi = (l, v, sub) => `<div class="kpi"><div class="kpi-label">${l}</div>
+    <div class="kpi-value num">${v}</div>${sub ? `<div class="kpi-sub">${sub}</div>` : ""}</div>`;
+  $("loy-kpis").innerHTML =
+    kpi("Clientes inscritos", activos.length) +
+    kpi("Puntos en circulación", saldo.toLocaleString("es")) +
+    // Esto es una deuda: lo que la marca tendría que regalar en descuentos si
+    // todos canjearan hoy. Conviene verlo crecer con calma.
+    kpi("Valor de esos puntos", money(saldo * vp), "lo que se descontaría si todos canjean hoy") +
+    kpi("Estado del programa", cfg ? (cfg.activo ? "Activo" : "Pausado") : "—",
+        cfg ? `1 punto por cada ${money(cfg.monto_por_punto)} · cada punto vale ${money(cfg.valor_punto)}` : "");
+}
+
+async function abrirCliente(id) {
+  const c = CLI.lista.find((x) => x.id === id);
+  if (!c) return;
+  CLI.sel = c;
+  pintarClientes();
+  const cfg = reglasFidelizacion();
+  $("cli-detail").hidden = false;
+  $("cli-d-name").textContent = c.full_name;
+  $("cli-d-meta").textContent = `Carnet ${c.card_code} · inscrito el ${new Date(c.created_at).toLocaleDateString()} · ${c.visits} visita(s)`;
+  $("cli-d-points").textContent = c.points_balance;
+  $("cli-d-value").textContent = cfg ? `puntos · valen ${money(c.points_balance * Number(cfg.valor_punto))}` : "puntos";
+  $("cli-e-name").value = c.full_name || "";
+  $("cli-e-phone").value = c.phone || "";
+  $("cli-e-email").value = c.email || "";
+  $("cli-e-birth").value = c.birth_date || "";
+  $("cli-e-active").checked = !!c.active;
+  $("cli-d-link").value = urlCarnet(c.card_code);
+  $("cli-e-msg").textContent = ""; $("cli-adj-msg").textContent = "";
+  $("cli-adj-pts").value = ""; $("cli-adj-note").value = "";
+
+  // Movimientos: la base solo devuelve los de las tiendas que este usuario
+  // puede ver. Para una gerente, los de su sucursal.
+  const { data } = await sb.from("loyalty_transactions")
+    .select("created_at, kind, points, amount, note, location_id, locations(name)")
+    .eq("customer_id", id).order("created_at", { ascending: false }).limit(100);
+  const body = document.querySelector("#table-cli-hist tbody");
+  const movs = data || [];
+  body.innerHTML = movs.length ? "" : '<tr><td colspan="6" class="hint">Sin movimientos visibles.</td></tr>';
+  movs.forEach((m) => {
+    const tr = document.createElement("tr");
+    const cls = m.points > 0 ? "pts-gana" : "pts-canje";
+    tr.innerHTML = `<td>${esc(new Date(m.created_at).toLocaleString())}</td>
+      <td>${esc((m.locations && m.locations.name) || "—")}</td>
+      <td>${esc(MOV_LABELS[m.kind] || m.kind)}</td>
+      <td class="num ${cls}">${m.points > 0 ? "+" : ""}${esc(m.points)}</td>
+      <td class="num">${m.amount != null ? money(m.amount) : ""}</td>
+      <td>${esc(m.note || "")}</td>`;
+    body.appendChild(tr);
+  });
+  $("cli-h-sub").textContent = isOwner()
+    ? "Todos los movimientos, de todas las tiendas."
+    : "Solo los movimientos de tu tienda. El saldo de arriba sí incluye lo de todas.";
+  $("cli-detail").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+$("btn-cli-buscar").addEventListener("click", () => cargarClientes($("cli-q").value));
+$("cli-q").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); cargarClientes($("cli-q").value); } });
+
+$("btn-cli-copiar").addEventListener("click", async () => {
+  const v = $("cli-d-link").value;
+  try { await navigator.clipboard.writeText(v); $("btn-cli-copiar").textContent = "¡Copiado!"; }
+  catch (e) { $("cli-d-link").select(); }
+  setTimeout(() => ($("btn-cli-copiar").textContent = "Copiar"), 1500);
+});
+
+$("btn-cli-guardar").addEventListener("click", async () => {
+  if (!CLI.sel) return;
+  const msg = $("cli-e-msg");
+  const nombre = $("cli-e-name").value.trim();
+  if (nombre.length < 2) { msg.textContent = "El nombre no puede quedar vacío."; return; }
+  // El saldo, el gasto y las visitas no van aquí: la base no deja tocarlos
+  // con un update directo, y la pantalla tampoco lo intenta.
+  const { error } = await sb.from("customers").update({
+    full_name: nombre,
+    phone: $("cli-e-phone").value.trim() || null,
+    email: $("cli-e-email").value.trim() || null,
+    birth_date: $("cli-e-birth").value || null,
+    active: $("cli-e-active").checked,
+  }).eq("id", CLI.sel.id);
+  if (error) { msg.textContent = `No se pudo guardar: ${error.message}`; return; }
+  msg.textContent = "Guardado.";
+  const id = CLI.sel.id;
+  await cargarClientes($("cli-q").value);
+  await abrirCliente(id);
+});
+
+$("btn-cli-ajustar").addEventListener("click", async () => {
+  if (!CLI.sel) return;
+  const msg = $("cli-adj-msg");
+  const pts = parseInt($("cli-adj-pts").value, 10);
+  const nota = $("cli-adj-note").value.trim();
+  if (!pts) { msg.textContent = "Escribe cuántos puntos (positivo para dar, negativo para quitar)."; return; }
+  if (!nota) { msg.textContent = "Escribe la razón: queda en el registro."; return; }
+  if (!confirm(`¿${pts > 0 ? "Dar" : "Quitar"} ${Math.abs(pts)} puntos a ${CLI.sel.full_name}?\n\nRazón: ${nota}`)) return;
+  const { error } = await sb.rpc("loyalty_ajustar", { p_customer_id: CLI.sel.id, p_puntos: pts, p_nota: nota });
+  if (error) { msg.textContent = error.message; return; }
+  const id = CLI.sel.id;
+  await cargarClientes($("cli-q").value);
+  await abrirCliente(id);
+  $("cli-adj-msg").textContent = "Ajuste aplicado.";
+});
+
+/* --- Reglas (solo propietario) ------------------------------------------- */
+function explicarReglas() {
+  const mpp = parseFloat($("rule-mpp").value) || 0;
+  const vp  = parseFloat($("rule-vp").value) || 0;
+  const cmax = parseFloat($("rule-cmax").value) || 0;
+  const cmin = parseInt($("rule-cmin").value, 10) || 0;
+  const ejemplo = 100;
+  const pts = mpp > 0 ? Math.floor(ejemplo / mpp) : 0;
+  const retorno = mpp > 0 ? (vp / mpp) * 100 : 0;     // % que regresa al cliente
+  $("rule-explain").className = "alert" + (retorno > 15 ? " warn" : "");
+  $("rule-explain").innerHTML =
+    `Por cada <strong>${money(mpp)}</strong> que gasta el cliente gana 1 punto, que vale <strong>${money(vp)}</strong>. ` +
+    `Una compra de ${money(ejemplo)} da <strong>${pts} puntos</strong> (${money(pts * vp)}). ` +
+    `O sea, le devuelves al cliente el <strong>${r2(retorno)}%</strong> de lo que gasta. ` +
+    `Para canjear necesita ${cmin} puntos (${money(cmin * vp)}), y nunca más del ${cmax}% de una venta.` +
+    (retorno > 15 ? `<br><strong>Ojo:</strong> devolver más del 15% se come buena parte del margen.` : "");
+}
+["rule-mpp", "rule-vp", "rule-cmax", "rule-cmin"].forEach((id) => $(id).addEventListener("input", explicarReglas));
+
+function llenarReglas() {
+  $("loy-rules-card").hidden = !isOwner();
+  const cfg = reglasFidelizacion();
+  if (!cfg || !isOwner()) return;
+  if (document.activeElement && document.activeElement.closest("#loy-rules-card")) return;
+  $("rule-activo").checked = !!cfg.activo;
+  $("rule-mpp").value  = cfg.monto_por_punto;
+  $("rule-vp").value   = cfg.valor_punto;
+  $("rule-min").value  = cfg.compra_minima;
+  $("rule-cmin").value = cfg.canje_minimo;
+  $("rule-cmax").value = cfg.canje_max_pct;
+  explicarReglas();
+}
+
+$("btn-rules-save").addEventListener("click", async () => {
+  const msg = $("rule-msg");
+  const nuevo = {
+    activo: $("rule-activo").checked,
+    monto_por_punto:   parseFloat($("rule-mpp").value) || 0,
+    valor_punto:       parseFloat($("rule-vp").value) || 0,
+    compra_minima:     parseFloat($("rule-min").value) || 0,
+    canje_minimo:      parseInt($("rule-cmin").value, 10) || 0,
+    canje_max_pct:     Math.min(100, Math.max(0, parseFloat($("rule-cmax").value) || 0)),
+    actualizado_en:    new Date().toISOString(),
+  };
+  if (!(nuevo.monto_por_punto > 0)) { msg.textContent = "El monto para ganar un punto tiene que ser mayor a cero."; return; }
+  if (!confirm("Las reglas nuevas aplican de inmediato en todas las tiendas. ¿Guardar?")) return;
+  const { error } = await sb.from("loyalty_config").update(nuevo).eq("id", true);
+  if (error) { msg.textContent = `No se pudo guardar: ${error.message}`; return; }
+  await cargarReglasFidelizacion();
+  msg.textContent = "Reglas guardadas.";
+  pintarKpisFidelizacion();
+  setTimeout(() => (msg.textContent = ""), 2500);
+});
 
 /* ===========================================================================
    CENTRO DE GASTOS

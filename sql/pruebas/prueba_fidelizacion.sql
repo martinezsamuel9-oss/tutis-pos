@@ -54,7 +54,7 @@ select 'carnet generado (10 caracteres)' as prueba,
   from customers where id = current_setting('t.cliente')::uuid;
 
 \echo ''
-\echo '=== P2: una venta le da puntos (0.10 x lempira) ==='
+\echo '=== P2: una venta le da 1 punto por cada dolar (L 27) gastado ==='
 do $$
 declare v jsonb; v_saldo int;
 begin
@@ -67,8 +67,9 @@ begin
       jsonb_build_object('item_type','topping','name','M&M''s','weight_g',30,'cost',1.8,'price_contribution',13.5))));
   select points_balance into v_saldo from customers where id=current_setting('t.cliente')::uuid;
   raise notice 'venta de % -> gano % puntos, saldo %', v->>'total', v->>'points_earned', v_saldo;
-  if v_saldo = 8 then raise notice '[ OK ] P2 81 lempiras x 0.10 = 8 puntos';
-  else raise warning '[ FALLA ] P2 esperaba 8 puntos, hay %', v_saldo; end if;
+  -- L 81 / L 27 = 3 dolares completos = 3 puntos = L 3.
+  if v_saldo = 3 then raise notice '[ OK ] P2 L 81 / L 27 = 3 puntos (L 3)';
+  else raise warning '[ FALLA ] P2 esperaba 3 puntos, hay %', v_saldo; end if;
 end $$;
 
 \echo ''
@@ -113,17 +114,17 @@ do $$
 declare v jsonb; v_antes int; v_despues int;
 begin
   select points_balance into v_antes from customers where id=current_setting('t.cliente')::uuid;
-  -- Venta de 100. El tope es 50 de descuento = 100 puntos a 0.50 c/u.
+  -- Venta de 100. El tope es 50 de descuento = 50 puntos a L 1 c/u.
   v := public.process_sale(jsonb_build_object(
     'location_id', current_setting('t.galerias')::uuid,
     'client_uuid', gen_random_uuid(),
     'customer_id', current_setting('t.cliente')::uuid,
-    'redeem_points', 200,                      -- pide canjear 200 (=100 de descuento)
+    'redeem_points', 200,                      -- pide canjear 200 (=L 200, mas que la venta)
     'lines', jsonb_build_array(jsonb_build_object('item_type','helado','name','Y','weight_g',200,'cost',6,'price_contribution',100))));
   select points_balance into v_despues from customers where id=current_setting('t.cliente')::uuid;
   raise notice 'pidio canjear 200, canjeo % por % de descuento; total quedo en %',
     v->>'points_redeemed', v->>'discount', v->>'total';
-  if (v->>'points_redeemed')::int = 100 and (v->>'discount')::numeric = 50 then
+  if (v->>'points_redeemed')::int = 50 and (v->>'discount')::numeric = 50 then
     raise notice '[ OK ] P5 el tope del 50%% se respeto';
   else raise warning '[ FALLA ] P5 el tope no se respeto'; end if;
 end $$;
@@ -133,15 +134,16 @@ end $$;
 do $$
 declare v jsonb;
 begin
-  -- Venta de 200 con 40 de descuento: debe ganar sobre 160, no sobre 200.
+  -- Venta de 200 canjeando 40 puntos (L 40): paga 160. Debe ganar sobre los
+  -- 160 pagados (5 puntos), no sobre los 200 de lista (7 puntos).
   v := public.process_sale(jsonb_build_object(
     'location_id', current_setting('t.galerias')::uuid,
     'client_uuid', gen_random_uuid(),
     'customer_id', current_setting('t.cliente')::uuid,
-    'redeem_points', 80,
+    'redeem_points', 40,
     'lines', jsonb_build_array(jsonb_build_object('item_type','helado','name','Y','weight_g',400,'cost',12,'price_contribution',200))));
-  if (v->>'points_earned')::int = 16 then
-    raise notice '[ OK ] P6 gano 16 puntos sobre los 160 pagados (no 20 sobre 200)';
+  if (v->>'points_earned')::int = 5 then
+    raise notice '[ OK ] P6 gano 5 puntos sobre los L 160 pagados (no 7 sobre L 200)';
   else raise warning '[ FALLA ] P6 gano % puntos', v->>'points_earned'; end if;
 end $$;
 
@@ -156,6 +158,8 @@ select pg_temp.ataque('P7c cajera borra movimientos',
   $q$delete from public.loyalty_transactions$q$);
 select pg_temp.ataque('P7d cajera cambia las reglas del programa',
   $q$update public.loyalty_config set valor_punto = 100$q$);
+select pg_temp.ataque('P7d2 cajera regala puntos bajando el monto por punto',
+  $q$update public.loyalty_config set monto_por_punto = 0.01$q$);
 select pg_temp.ataque('P7e cajera ajusta puntos (es de gerente)',
   $q$select public.loyalty_ajustar(current_setting('t.cliente')::uuid, 500, 'me regalo')$q$);
 select pg_temp.ataque('P7f saldo negativo',
@@ -208,3 +212,66 @@ select 'P11 diferencia entre saldo y suma de movimientos (debe ser 0)' as prueba
   left join loyalty_transactions t on t.customer_id = c.id
  where c.id = current_setting('t.cliente')::uuid
  group by c.points_balance;
+
+\echo ''
+\echo '=== P12: los puntos NUNCA tumban una venta (venta sin internet, cliente desactivado) ==='
+-- Escenario: la cajera cobra sin internet con el carnet de la clienta. Antes
+-- de que la caja sincronice, el gerente desactiva a esa clienta. Al llegar
+-- la venta, no puede rechazarse: la cola descarta los rechazos y se perdería
+-- una venta que sí ocurrió.
+update public.customers set active = false where phone = '9988-7766';
+set role authenticated;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+do $$
+declare v jsonb; v_cli uuid;
+begin
+  v := public.process_sale(jsonb_build_object(
+    'location_id', current_setting('t.galerias')::uuid,
+    'client_uuid', gen_random_uuid(),
+    'customer_id', current_setting('t.cliente')::uuid,
+    'synced_offline', true,
+    'lines', jsonb_build_array(jsonb_build_object('item_type','helado','name','Y','weight_g',100,'cost',3,'price_contribution',45))));
+  select customer_id into v_cli from public.sales where id = (v->>'sale_id')::uuid;
+  if v->>'sale_id' is not null and v_cli is null then
+    raise notice '[ OK ] P12 la venta entro (folio %) y quedo sin cliente, sin puntos', v->>'folio';
+  else
+    raise warning '[ FALLA ] P12 resultado inesperado: %', v;
+  end if;
+exception when others then
+  raise warning '[ FALLA ] P12 la venta se RECHAZO y se habria perdido: %', SQLERRM;
+end $$;
+
+\echo '--- P12b: pero si pedia CANJEAR con un cliente inactivo, si se rechaza ---'
+do $$
+begin
+  perform public.process_sale(jsonb_build_object(
+    'location_id', current_setting('t.galerias')::uuid,
+    'client_uuid', gen_random_uuid(),
+    'customer_id', current_setting('t.cliente')::uuid,
+    'redeem_points', 30,
+    'lines', jsonb_build_array(jsonb_build_object('item_type','helado','name','Y','weight_g',100,'cost',3,'price_contribution',45))));
+  raise warning '[ FALLA ] P12b se canjearon puntos de un cliente inactivo';
+exception when others then
+  raise notice '[ bloqueado ] P12b canje con cliente inactivo (%)', SQLERRM;
+end $$;
+
+\echo '--- P12c: y lo mismo con el programa APAGADO y un cliente que ya no existe ---'
+reset role; reset request.jwt.claim.sub;
+update public.loyalty_config set activo = false;
+set role authenticated;
+set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
+do $$
+declare v jsonb;
+begin
+  v := public.process_sale(jsonb_build_object(
+    'location_id', current_setting('t.galerias')::uuid,
+    'client_uuid', gen_random_uuid(),
+    'customer_id', gen_random_uuid(),              -- un cliente que no existe
+    'lines', jsonb_build_array(jsonb_build_object('item_type','helado','name','Y','weight_g',100,'cost',3,'price_contribution',45))));
+  raise notice '[ OK ] P12c la venta entro igual (folio %)', v->>'folio';
+exception when others then
+  raise warning '[ FALLA ] P12c la venta se rechazo: %', SQLERRM;
+end $$;
+reset role; reset request.jwt.claim.sub;
+update public.loyalty_config set activo = true;
+update public.customers set active = true where phone = '9988-7766';
