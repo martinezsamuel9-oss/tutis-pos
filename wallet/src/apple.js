@@ -23,6 +23,14 @@ export function contenidoPase(carnet, opciones) {
   const codigo = carnet.card_code;
   const puntos = Number(carnet.puntos || 0);
 
+  const vale = `L ${Number(carnet.vale || 0).toFixed(2)}`;
+
+  // Colores de la guía de marca (Pantone, no tomados de una foto):
+  //   fondo   219 C  #DA1884  magenta
+  //   texto   blanco          contraste 4.7 sobre el magenta: pasa para texto chico
+  //   etiquetas 706 C #F7CED7 rosado claro, la pareja que la guía usa sobre el magenta
+  // El verde de marca (576 C) se descartó para el pase: con texto blanco daba
+  // 3.1 de contraste, y las etiquetas chicas se leen mal en la calle con sol.
   const pase = {
     formatVersion: 1,
     passTypeIdentifier: passTypeId,
@@ -33,26 +41,30 @@ export function contenidoPase(carnet, opciones) {
     organizationName: "Tuti's",
     description: "Carnet de cliente frecuente Tuti's",
     logoText: "",
+    backgroundColor: "rgb(218, 24, 132)",
     foregroundColor: "rgb(255, 255, 255)",
-    labelColor: "rgb(255, 236, 214)",
-    backgroundColor: "rgb(201, 122, 37)",
+    labelColor: "rgb(247, 206, 215)",
 
     storeCard: {
+      // Arriba a la derecha: cuánto valen sus puntos en dinero. Va como texto
+      // ("L 240.00") y no con currencyCode, que iOS muestra como "HNL 240.00".
       headerFields: [
-        { key: "puntos", label: "PUNTOS", value: puntos, numberStyle: "PKNumberStyleDecimal",
-          // Cuando el saldo cambie y el pase se actualice, iOS muestra esta
-          // notificación. %@ es el valor nuevo.
-          changeMessage: "Ahora tienes %@ puntos en Tuti's" },
+        { key: "saldo", label: "SALDO", value: vale, textAlignment: "PKTextAlignmentRight" },
       ],
+      // Lo grande son los PUNTOS. En storeCard, Wallet pone la etiqueta DEBAJO
+      // del número, así que se lee "240 / PUNTOS".
       primaryFields: [
-        { key: "valor", label: "EQUIVALEN A", value: Number(carnet.vale || 0),
-          currencyCode: "HNL" },
+        { key: "puntos", label: "PUNTOS", value: puntos, numberStyle: "PKNumberStyleDecimal",
+          // Cuando el saldo cambie y el pase se actualice, iOS muestra esto.
+          // %@ es el valor nuevo.
+          changeMessage: "Ahora tienes %@ puntos en Tuti's" },
       ],
       secondaryFields: [
         { key: "nombre", label: "CLIENTE", value: carnet.nombre || "" },
       ],
       auxiliaryFields: [
-        { key: "carnet", label: "CARNET", value: codigo.replace(/(.{5})(.*)/, "$1 $2") },
+        { key: "carnet", label: "CARNET", value: codigo.replace(/(.{5})(.*)/, "$1 $2"),
+          textAlignment: "PKTextAlignmentRight" },
       ],
       // El reverso del pase. Sin enlaces al sitio: el dueño lo pidió para todo
       // lo que se entrega al cliente.
