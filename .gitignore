@@ -14,3 +14,11 @@ package-lock.json
 # Secretos locales de desarrollo (nunca al repositorio)
 .dev.vars
 **/.dev.vars
+
+# Llaves y certificados de Apple Wallet / Google Wallet. NUNCA al repositorio.
+wallet/secretos/
+*.p12
+*.pem
+*.p8
+*.cer
+wallet-service-account*.json

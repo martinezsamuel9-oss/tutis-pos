@@ -27,4 +27,10 @@ window.TUTIS_CONFIG = {
   // Báscula (se usa solo cuando conectes una por USB/serial).
   // 9600 es lo más común; si tu báscula usa otra velocidad, cámbiala aquí.
   SCALE_BAUD_RATE: 9600,
+
+  // Servicio de pases de Apple Wallet y Google Wallet. Cada uno se enciende
+  // aparte, cuando su certificado o su cuenta estén configurados.
+  WALLET_URL: "https://wallet.slabblu.com",
+  WALLET_APPLE: false,
+  WALLET_GOOGLE: false,
 };

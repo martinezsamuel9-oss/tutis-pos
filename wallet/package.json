@@ -1,0 +1,6 @@
+{
+  "name": "tutis-wallet",
+  "private": true,
+  "type": "module",
+  "description": "Pases de Apple Wallet y Google Wallet para el carnet de Tuti's"
+}

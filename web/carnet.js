@@ -48,8 +48,9 @@
   }
 
   async function botonesWallet() {
-    // El servicio de pases vive en el Worker de wallet. Si todavía no está
-    // configurado, los botones simplemente no aparecen.
+    // El servicio de pases vive en su propio Worker. Cada wallet se enciende
+    // por separado en config.js: un botón que lleva a "todavía no está
+    // disponible" es peor que no tener botón.
     const base = CFG.WALLET_URL;
     if (!base) return;
     $("btn-apple").href  = `${base}/apple/${encodeURIComponent(codigo)}`;
@@ -57,9 +58,9 @@
     // Cada quien ve el botón de su teléfono; en una compu se ven los dos.
     const ua = navigator.userAgent;
     const ios = /iPhone|iPad|iPod/i.test(ua), android = /Android/i.test(ua);
-    $("btn-apple").hidden  = android;
-    $("btn-google").hidden = ios;
-    $("wallets").hidden = false;
+    $("btn-apple").hidden  = !CFG.WALLET_APPLE  || android;
+    $("btn-google").hidden = !CFG.WALLET_GOOGLE || ios;
+    $("wallets").hidden = $("btn-apple").hidden && $("btn-google").hidden;
   }
 
   if (!codigo || codigo.length < 8) { error("Este enlace de carnet no es válido."); return; }

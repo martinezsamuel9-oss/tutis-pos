@@ -62,6 +62,8 @@ sql/06_ventas_por_hora.sql  dashboard_summary devuelve además ventas por hora
 sql/07_cierre_automatico.sql daily_closing_all() + bitácora de correos
 sql/08_fidelizacion.sql     clientes, puntos, canje y carnet público
 cierre-diario/      Worker programado que manda el cierre (ver su LEEME.md)
+wallet/             Worker de pases de Apple/Google Wallet en wallet.slabblu.com (ver su LEEME.md)
+wallet/secretos/    llave y certificado de Apple — GITIGNORADO, nunca al repo
 sql/pruebas/        prueba_aislamiento.sql (13) + prueba_seguridad.sql (48 ataques)
                     + prueba_fidelizacion.sql (19)
                     + datos_de_demostracion.sql (14 días de ventas, borrables)
@@ -187,6 +189,28 @@ Lo que no hay que deshacer:
 10. **`carnet.css` necesita su propia regla `[hidden] { display:none !important }`.**
     Es una hoja aparte de la caja; sin ella los botones de Wallet aparecían
     aunque el servicio de pases no existiera, apuntando a `#`.
+
+## 3.0.1 Pases de Wallet
+
+Viven en `wallet/`, Worker aparte en `wallet.slabblu.com`. Su LEEME.md tiene
+todo. Lo que no hay que deshacer:
+
+1. **No usa la llave de servicio de Supabase.** Lee el carnet con
+   `loyalty_carnet` y la llave pública, igual que el carnet web.
+2. **La firma PKCS#7 (`src/cms.js`) está hecha a mano con WebCrypto.** Una
+   librería JS pura haría la RSA en JS y pasaría los 10 ms de CPU del plan
+   gratuito. Si se toca, hay que volver a verificar con `openssl cms -verify`.
+   Trampa clásica: lo que se firma son los atributos codificados como SET
+   (0x31), pero en el SignerInfo van con la etiqueta [0] (0xA0).
+3. **Cada pase lleva `webServiceURL` desde el primero.** Un pase emitido sin él
+   no se puede actualizar jamás.
+4. **El token de cada pase es HMAC(código, WALLET_HMAC_SECRET).** Si el secreto
+   falta o es corto, el servicio responde 503: falla cerrado. Cambiar ese
+   secreto deja sin actualizaciones a los pases que ya están en los teléfonos.
+5. **El certificado de Apple vence el 31/10/2027.** Pass Type ID
+   `pass.com.slabblu.tutis`, Team ID `95P9N796G9`.
+6. **`compatibility_date` no puede ser más nueva que lo que soporta el workerd
+   local** o `wrangler dev` no arranca.
 
 ## 3.1 Dashboard y gastos
 

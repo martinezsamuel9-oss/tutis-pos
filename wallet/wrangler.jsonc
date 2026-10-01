@@ -1,0 +1,53 @@
+{
+  // ==========================================================================
+  //  TUTI'S — Servicio de pases de Apple Wallet y Google Wallet
+  //
+  //  Worker APARTE de la caja: aquí vive la llave privada del certificado de
+  //  Apple, que no tiene nada que hacer cerca del sitio del punto de venta.
+  //
+  //  Publicar:   cd wallet && npx wrangler deploy
+  //  Ver logs:   npx wrangler tail tutis-wallet
+  //
+  //  Secretos (npx wrangler secret put <NOMBRE>):
+  //    APPLE_CERT_PEM      certificado del Pass Type ID (wallet/secretos/pass-tutis-cert.pem)
+  //    APPLE_KEY_PEM       su llave privada            (wallet/secretos/pass-tutis.key)
+  //    APPLE_WWDR_PEM      intermedio WWDR G4 de Apple (wallet/secretos/wwdr-g4.pem)
+  //    WALLET_HMAC_SECRET  firma los tokens de cada pase (aleatorio, no se reutiliza)
+  //
+  //  El certificado de Apple VENCE el 31/10/2027. Antes de esa fecha hay que
+  //  generar uno nuevo con el mismo Pass Type ID y cambiar APPLE_CERT_PEM y
+  //  APPLE_KEY_PEM; los pases que ya tienen las clientas siguen funcionando.
+  // ==========================================================================
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "tutis-wallet",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-25",
+
+  "routes": [
+    { "pattern": "wallet.slabblu.com", "custom_domain": true }
+  ],
+  // Solo por su dominio propio, no por una dirección workers.dev de más.
+  "workers_dev": false,
+
+  // Las imágenes del pase van dentro del Worker como datos binarios.
+  "rules": [
+    { "type": "Data", "globs": ["**/*.png"], "fallthrough": true }
+  ],
+
+  // Qué iPhones tienen qué carnet, para avisarles cuando cambien los puntos.
+  "kv_namespaces": [
+    { "binding": "WALLET_REG", "id": "4b7a60af394d4fdc850ec986dc82cd49" }
+  ],
+
+  "vars": {
+    "WALLET_BASE_URL": "https://wallet.slabblu.com",
+    "APPLE_PASS_TYPE_ID": "pass.com.slabblu.tutis",
+    "APPLE_TEAM_ID": "95P9N796G9",
+    // Lo mismo que ya está público en web/config.js: no es secreto. Este
+    // Worker solo lee el carnet como lo lee la clienta.
+    "SUPABASE_URL": "https://cykvmzendayjvkxzbhha.supabase.co",
+    "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN5a3ZtemVuZGF5anZreHpiaGhhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODk4NjcyNTEsImV4cCI6MjEwNTQ0MzI1MX0.-7XCQS4FvwEVqlL6YeSbeuOh8hPIPgIJZ7nYAUimXDw"
+  },
+
+  "observability": { "enabled": true }
+}
