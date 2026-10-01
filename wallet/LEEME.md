@@ -58,9 +58,40 @@ uno nuevo para el mismo Pass Type ID (`pass.com.slabblu.tutis`) y se cambian
 siguen funcionando; lo que dejaría de funcionar al vencer es emitir pases
 nuevos y actualizar los existentes.
 
-## Lo que falta (fase 2)
+## Los puntos se actualizan solos
+
+```
+venta o ajuste → cambia customers.points_balance
+  → disparador trg_wallet_aviso (sql/09) → pg_net, en segundo plano
+  → POST /notificar  (X-Tutis-Secreto)
+  → APNs con el certificado del pase, aviso vacío
+  → el iPhone pregunta qué cambió y baja el pase nuevo
+  → Wallet muestra "Ahora tienes N puntos en Tuti's"
+```
+
+- **El aviso nunca frena ni tumba una venta.** pg_net manda la llamada en
+  segundo plano tras confirmarse la venta; si falla al encolar, queda una
+  advertencia y la venta sigue (prueba W6).
+- **Apple exige el certificado del pase para estos avisos; la llave `.p8` no
+  sirve para Wallet.** El Worker lo presenta por el enlace mTLS `APNS_CERT`,
+  que vive en el almacén de certificados de Cloudflare (aparte de los secretos):
+
+  ```bash
+  npx wrangler mtls-certificate upload --cert secretos/pass-tutis-cadena.pem --key secretos/pass-tutis.key --name tutis-pass-apns
+  ```
+
+  Al renovar el certificado en 2027 hay que subirlo aquí también.
+- **El aviso va vacío**, como pide Apple: no tiene entrega garantizada y se
+  agrupa, así que solo dice "hay algo nuevo".
+- **En local no se puede probar**: el `fetch` de `wrangler dev` no habla HTTP/2
+  con Apple; en producción, el borde de Cloudflare sí.
+- Si Apple responde 410 (el iPhone ya no tiene el pase), se borra ese registro.
+- `/notificar` exige `WALLET_NOTIFY_SECRET` (64 caracteres). El mismo valor va
+  en `privado.wallet_config`, un esquema que la API no publica. El SQL que lo
+  conecta se generó en `secretos/` y no entra al repositorio.
+- Una venta que canjea y gana puntos manda dos avisos (dos cambios de saldo).
+  Apple los agrupa; no vale la pena complicar process_sale por eso.
+
+## Lo que falta
 
 - **Google Wallet**: falta el Issuer ID y la cuenta de servicio.
-- **Puntos que se actualizan solos**: avisarle al iPhone (APNs) y a Google cada
-  vez que cambia un saldo. Las registraciones de cada iPhone ya se guardan en
-  el KV `WALLET_REG` para cuando esto exista.

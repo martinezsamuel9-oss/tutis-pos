@@ -45,7 +45,10 @@ export default {
 
     try {
       // --- Servicio web de Apple (lo llama el iPhone, no la clienta) -------
-      if (partes[0] === "apple" && partes[1] === "v1") return await servicioApple(req, env, partes.slice(2));
+      if (partes[0] === "apple" && partes[1] === "v1") return await servicioApple(req, env, partes.slice(2), url);
+
+      // --- Aviso de la base: cambió el saldo de un carnet ------------------
+      if (req.method === "POST" && partes[0] === "notificar" && !partes[1]) return await notificar(req, env);
 
       // --- Descargar el pase ----------------------------------------------
       if (req.method === "GET" && partes[0] === "apple" && partes[1]) {
@@ -137,7 +140,7 @@ async function descargarApple(env, codigo) {
    avisemos que cambiaron los puntos (fase 2, notificaciones) pide la versión
    nueva aquí. Va desde el primer pase porque un pase emitido sin servicio no
    se puede actualizar nunca. */
-async function servicioApple(req, env, p) {
+async function servicioApple(req, env, p, url) {
   if (p[0] === "log" && req.method === "POST") {
     const cuerpo = await req.text();
     console.log("Wallet (Apple) reporta:", cuerpo.slice(0, 2000));
@@ -158,14 +161,22 @@ async function servicioApple(req, env, p) {
     const tipo = p[3];
     if (tipo !== env.APPLE_PASS_TYPE_ID) return new Response(null, { status: 404 });
 
-    // Lista de pases de este dispositivo que cambiaron (sin token: así lo
-    // define Apple). Mientras no haya notificaciones, se devuelven todos y el
-    // iPhone los vuelve a pedir; es una llamada que casi nunca ocurre.
+    // Qué pases de este iPhone cambiaron desde la última vez que preguntó
+    // (sin token: así lo define Apple). El iPhone manda la marca que le dimos
+    // la vez anterior en passesUpdatedSince; si no manda nada, son todos.
     if (req.method === "GET" && !p[4]) {
+      const desde = Number(url.searchParams.get("passesUpdatedSince") || 0);
       const lista = await env.WALLET_REG.list({ prefix: `dev:${dispositivo}:` });
-      const seriales = lista.keys.map((k) => k.name.split(":").pop());
-      if (!seriales.length) return new Response(null, { status: 204 });
-      return Response.json({ lastUpdated: String(Date.now()), serialNumbers: seriales });
+      const cambiados = [];
+      let ultima = desde;
+      for (const k of lista.keys) {
+        const serial = k.name.split(":").pop();
+        const upd = Number(await env.WALLET_REG.get(`upd:${serial}`) || 0);
+        if (!desde || upd > desde) cambiados.push(serial);
+        if (upd > ultima) ultima = upd;
+      }
+      if (!cambiados.length) return new Response(null, { status: 204 });
+      return Response.json({ lastUpdated: String(ultima || Date.now()), serialNumbers: cambiados });
     }
 
     const serial = limpiarCodigo(p[4]);
@@ -199,4 +210,71 @@ async function servicioApple(req, env, p) {
   }
 
   return new Response(null, { status: 404 });
+}
+
+/* --- Avisarle a los iPhone que cambió un saldo ------------------------------
+   Lo llama la base (pg_net) cada vez que cambia el saldo de un carnet. Le
+   manda a Apple un aviso VACÍO a cada iPhone que tiene ese pase; el iPhone
+   entonces pregunta qué cambió y baja el pase nuevo él solo.
+
+   El aviso va vacío a propósito, como pide Apple: los avisos no tienen
+   entrega garantizada y se agrupan, así que no deben llevar información — solo
+   "hay algo nuevo, ven a buscarlo".
+
+   Apple exige firmar estos avisos con el MISMO certificado del pase (la llave
+   .p8 no sirve para Wallet). El Worker lo presenta por el enlace mTLS
+   APNS_CERT, que vive en el almacén de certificados de Cloudflare. */
+async function notificar(req, env) {
+  const secreto = env.WALLET_NOTIFY_SECRET || "";
+  const dado = req.headers.get("X-Tutis-Secreto") || "";
+  // Sin esto cualquiera podría hacernos mandar avisos a Apple en ráfaga, y
+  // Apple castiga a quien abusa de su servicio.
+  if (secreto.length < 32 || !igualSeguro(dado, secreto)) return new Response(null, { status: 401 });
+
+  const { codigo } = await req.json().catch(() => ({}));
+  const serial = limpiarCodigo(codigo);
+  if (serial.length < 8) return new Response(null, { status: 400 });
+
+  // La marca de "cambió" se guarda ANTES de avisar: es lo que el iPhone va a
+  // comparar cuando pregunte qué pases cambiaron.
+  await env.WALLET_REG.put(`upd:${serial}`, String(Date.now()));
+
+  const lista = await env.WALLET_REG.list({ prefix: `serial:${serial}:` });
+  if (!lista.keys.length) return Response.json({ serial, iphones: 0 });
+  if (!env.APNS_CERT) {
+    console.log(`Hay iPhones con el carnet ${serial}, pero falta el certificado para avisarle a Apple (APNS_CERT).`);
+    return Response.json({ serial, iphones: lista.keys.length, avisados: 0, motivo: "sin APNS_CERT" }, { status: 503 });
+  }
+
+  const resultados = [];
+  for (const k of lista.keys) {
+    const dispositivo = k.name.slice(`serial:${serial}:`.length);
+    const reg = await env.WALLET_REG.get(`dev:${dispositivo}:${serial}`, "json");
+    if (!reg || !reg.pushToken) continue;
+    resultados.push(await avisarAApple(env, reg.pushToken, dispositivo, serial));
+  }
+  const bien = resultados.filter((r) => r.status === 200).length;
+  console.log(`Carnet ${serial}: ${bien} de ${resultados.length} iPhone(s) avisados.`);
+  return Response.json({ serial, iphones: resultados.length, avisados: bien, resultados });
+}
+
+async function avisarAApple(env, pushToken, dispositivo, serial) {
+  // El token de aviso lo dio el iPhone al registrarse. Solo puede ser
+  // hexadecimal: cualquier otra cosa se descarta antes de armar la dirección.
+  if (!/^[0-9a-fA-F]{32,200}$/.test(pushToken)) return { status: 0, detalle: "token inválido" };
+  const r = await env.APNS_CERT.fetch(`https://api.push.apple.com/3/device/${pushToken}`, {
+    method: "POST",
+    headers: { "apns-topic": env.APPLE_PASS_TYPE_ID, "Content-Type": "application/json" },
+    body: "{}",
+  });
+  let detalle = "";
+  if (r.status !== 200) detalle = (await r.text().catch(() => "")).slice(0, 200);
+  // 410: Apple dice que ese iPhone ya no tiene el pase. Se olvida, para no
+  // seguir avisándole a un teléfono que no lo va a pedir nunca.
+  if (r.status === 410) {
+    await env.WALLET_REG.delete(`dev:${dispositivo}:${serial}`);
+    await env.WALLET_REG.delete(`serial:${serial}:${dispositivo}`);
+  }
+  if (r.status !== 200) console.error(`Aviso a Apple para ${serial} respondió ${r.status}: ${detalle}`);
+  return { status: r.status, detalle };
 }
