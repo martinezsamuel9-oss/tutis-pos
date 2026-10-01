@@ -31,6 +31,6 @@ window.TUTIS_CONFIG = {
   // Servicio de pases de Apple Wallet y Google Wallet. Cada uno se enciende
   // aparte, cuando su certificado o su cuenta estén configurados.
   WALLET_URL: "https://wallet.slabblu.com",
-  WALLET_APPLE: false,
+  WALLET_APPLE: true,
   WALLET_GOOGLE: false,
 };
