@@ -8,7 +8,14 @@ insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111', 'propietario@tutis.test'),
   ('22222222-2222-2222-2222-222222222222', 'gerente.galerias@tutis.test'),
   ('33333333-3333-3333-3333-333333333333', 'cajera.galerias@tutis.test'),
-  ('44444444-4444-4444-4444-444444444444', 'gerente.multiplaza@tutis.test');
+  ('44444444-4444-4444-4444-444444444444', 'gerente.multiplaza@tutis.test')
+-- Las tres suites comparten usuarios de prueba y tienen que poder correrse
+-- seguidas sobre la misma base.
+on conflict (id) do nothing;
+
+insert into public.profiles (id, role, location_id, active)
+select id, 'cajera', null, true from auth.users
+on conflict (id) do nothing;
 
 -- El trigger ya creó sus perfiles como cajera sin sucursal. Los asignamos:
 update public.profiles set role='propietario', location_id=null, full_name='Samuel (dueño)'
