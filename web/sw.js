@@ -25,7 +25,7 @@
    Cómo publicar una versión nueva: sube CACHE_VERSION. Eso borra la caché
    anterior y obliga a bajar los archivos otra vez.
    =========================================================================== */
-const CACHE_VERSION = "tutis-v8";
+const CACHE_VERSION = "tutis-v9";
 
 const APP_SHELL = [
   "./",
@@ -39,6 +39,7 @@ const APP_SHELL = [
   "./icon-512.png",
   "./manifest.webmanifest",
   "./carnet.html",
+  "./carnet",
   "./carnet.css",
   "./carnet.js",
   "./vendor/qrcode.min.js",
@@ -90,11 +91,21 @@ async function redPrimero(req) {
     }
     return res;
   } catch (e) {
-    const guardado = await cache.match(req);
+    // El carnet es la misma página para todos los códigos: el código viene en
+    // ?c= y lo lee el JavaScript. Así que, sin red, cualquier /carnet?c=…
+    // se sirve con la copia guardada, ignorando el ?c=.
+    const esCarnet = /\/carnet(\.html)?$/.test(new URL(req.url).pathname);
+    const guardado = await cache.match(req, { ignoreSearch: esCarnet });
     if (guardado) return guardado;
     // Una navegación sin copia guardada: al menos devolvemos la portada, que
     // sí está en caché desde la instalación.
     if (req.mode === "navigate") {
+      // Una clienta que abre su carnet sin señal tiene que ver su carnet, no
+      // la pantalla de la caja.
+      if (esCarnet) {
+        const carnet = await cache.match("./carnet") || await cache.match("./carnet.html");
+        if (carnet) return carnet;
+      }
       const portada = await cache.match("./index.html") || await cache.match("./");
       if (portada) return portada;
     }

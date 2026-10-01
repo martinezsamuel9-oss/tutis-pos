@@ -2558,7 +2558,9 @@ const MOV_LABELS = { gana: "Ganó", canje: "Canjeó", ajuste: "Ajuste", vence: "
 // La dirección del carnet. Usa el mismo sitio en el que está abierta la caja,
 // así no hay que configurarla en ningún lado.
 function urlCarnet(codigo) {
-  return `${location.origin}${location.pathname.replace(/[^/]*$/, "")}carnet.html?c=${encodeURIComponent(codigo)}`;
+  // Sin ".html": el servidor redirige carnet.html → carnet, y cada salto es
+  // un toque más de espera en un teléfono con poca señal.
+  return `${location.origin}${location.pathname.replace(/[^/]*$/, "")}carnet?c=${encodeURIComponent(codigo)}`;
 }
 
 async function cargarClientes(texto) {
