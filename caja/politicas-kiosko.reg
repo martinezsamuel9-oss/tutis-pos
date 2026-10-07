@@ -1,0 +1,49 @@
+Windows Registry Editor Version 5.00
+
+; ============================================================================
+;  TUTI'S - Politicas de Chrome para la computadora de la CAJA
+;
+;  Aplicar con doble clic, desde una cuenta de ADMINISTRADOR de Windows.
+;  Se guardan en HKEY_LOCAL_MACHINE: una cuenta normal de Windows (la de la
+;  cajera) no las puede quitar.
+;
+;  OJO: afectan a TODO Chrome en esta computadora. Con esto Chrome solo abre
+;  la caja. No aplicarlo en una computadora que se use para otras cosas.
+;  Explicacion completa en caja/LEEME.md.
+; ============================================================================
+
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome]
+; Sin herramientas de desarrollador: sin ellas no se puede inventar una
+; lectura de bascula ni tocar una venta desde la consola.
+"DeveloperToolsAvailability"=dword:00000002
+; Sin ventanas de incognito, sin invitados, sin otros perfiles.
+"IncognitoModeAvailability"=dword:00000001
+"BrowserGuestModeEnabled"=dword:00000000
+"BrowserAddPersonEnabled"=dword:00000000
+; Que Chrome no guarde contrasenas: en una caja compartida, cualquiera
+; entraria con la cuenta de la gerente.
+"PasswordManagerEnabled"=dword:00000000
+; No se descarga nada, y el administrador de tareas de Chrome no cierra la caja.
+"DownloadRestrictions"=dword:00000003
+"TaskManagerEndProcessEnabled"=dword:00000000
+
+; Ninguna extension: una extension puede meter codigo en la pagina de la caja.
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\ExtensionInstallBlocklist]
+"1"="*"
+
+; Todo bloqueado...
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\URLBlocklist]
+"1"="*"
+"2"="javascript://*"
+
+; ...menos la caja y su base de datos. chrome://policy se deja para que
+; soporte tecnico pueda revisar que esto quedo aplicado.
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\URLAllowlist]
+"1"="https://tutis.slabblu.com"
+"2"="https://cykvmzendayjvkxzbhha.supabase.co"
+"3"="about:blank"
+"4"="chrome://policy"
+
+; La caja puede leer la bascula sin preguntar cada vez.
+[HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome\SerialAllowAllPortsForUrls]
+"1"="https://tutis.slabblu.com"

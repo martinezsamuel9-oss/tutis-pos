@@ -24,9 +24,13 @@ window.TUTIS_CONFIG = {
   // lo que hace que "el cierre del día" corresponda al día real del negocio.
   UTC_OFFSET_HOURS: -6,
 
-  // Báscula (se usa solo cuando conectes una por USB/serial).
-  // 9600 es lo más común; si tu báscula usa otra velocidad, cámbiala aquí.
+  // Báscula. Lo de abajo es lo que usa la CAS PD-II (9600 baudios, 7 bits,
+  // paridad par, 1 bit de parada). Solo hay que tocarlo si se cambia de
+  // modelo de báscula. Cómo configurar la báscula: caja/LEEME.md.
   SCALE_BAUD_RATE: 9600,
+  SCALE_DATA_BITS: 7,
+  SCALE_PARITY: "even",
+  SCALE_STOP_BITS: 1,
 
   // Servicio de pases de Apple Wallet y Google Wallet. Cada uno se enciende
   // aparte, cuando su certificado o su cuenta estén configurados.

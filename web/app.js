@@ -8,7 +8,7 @@
      4. Motor de precios y costos
      5. Carga de datos según el rol
      6. Pantallas: Venta, Inventario, Toppings, Reportes, Configuración, Admin
-     7. Báscula (Web Serial)
+     7. Báscula (Web Serial; el protocolo está en bascula.js)
    =========================================================================== */
 "use strict";
 
@@ -178,6 +178,7 @@ function queueSale(payload) {
 let lastSyncFailed = false;
 
 async function syncPending() {
+  if (sb && navigator.onLine) await syncAnulaciones();
   if (!sb || !STATE.pending.length || !navigator.onLine) return;
   const remaining = [];
   let hadNetworkFailure = false;
@@ -228,7 +229,7 @@ function updateConnBadge() {
 
 window.addEventListener("online", () => { updateConnBadge(); syncPending(); if (typeof pintarClienteSeleccionado === "function") pintarClienteSeleccionado(); });
 window.addEventListener("offline", () => { updateConnBadge(); if (typeof pintarClienteSeleccionado === "function") pintarClienteSeleccionado(); });
-setInterval(() => { if (navigator.onLine && STATE.pending.length) syncPending(); }, 60000);
+setInterval(() => { if (navigator.onLine) syncPending(); }, 60000);
 
 /* ===========================================================================
    4. MOTOR DE PRECIOS Y COSTOS
@@ -368,6 +369,9 @@ async function startSession() {
   $("app").hidden = false;
   applyRoleVisibility();
   await loadData();
+  // Un pedido pesado que quedó a medias (se recargó la caja) se registra
+  // como anulado antes de empezar a cobrar.
+  await recuperarPedidoAbandonado();
   await syncPending();
   updateConnBadge();
   if (canManage()) await loadDashboard();
@@ -465,6 +469,7 @@ function renderAll() {
   const loc = activeLocation();
   $("location-tag").textContent = loc ? loc.name : "Sin sucursal";
   fillSaleSelectors();
+  pintarModo();
   renderToppingChips();
   renderOrderRows();
   renderQuote();
@@ -495,14 +500,44 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     if (btn.dataset.tab === "dashboard" && !DASH.loaded) loadDashboard();
     if (btn.dataset.tab === "gastos" && !GAS.loaded) cargarGastos();
     if (btn.dataset.tab === "clientes") { llenarReglas(); if (!CLI.loaded) cargarClientes(""); }
+    if (btn.dataset.tab === "reportes") cargarControlPesos();
+    if (btn.dataset.tab === "config") pintarEstadoPin();
   });
 });
 
 /* ===========================================================================
    8. VENTA
    =========================================================================== */
-let iceUnit = "g", cupUnit = "g", totalUnit = "g";
+let iceUnit = "g";
 const orderRows = [];
+
+/* --- Lo pesado queda fijo ----------------------------------------------------
+   Regla del negocio (2026-10-07). En el sistema anterior la cajera leía la
+   báscula y tecleaba el número; podía escribir el que quisiera. Aquí:
+   · Todo se pesa sobre el MISMO vaso, sin quitarlo. Cada "Pesar" toma una
+     lectura ESTABLE de la báscula y se cobra lo que esa lectura subió desde
+     la anterior. El helado es la primera lectura menos la tara del vaso, y
+     la tara sale del catálogo: no se teclea.
+   · Una línea ya pesada no se borra ni se edita, y el vaso ya no se cambia.
+     Lo único posible es anular el pedido completo, y eso queda registrado
+     con nombre y motivo.
+   · Si la báscula falla, se teclea el peso con el PIN de una gerente.
+   · El pedido en curso se guarda en el navegador. Si alguien recarga la caja
+     para desaparecer un pedido pesado, al volver queda registrado como
+     anulado. */
+const PESO = {
+  modo: "bascula",     // "bascula" | "manual"
+  capturas: [],        // lecturas en orden: {que, g, crudo, at}
+  ultimoBruto: null,   // última lectura (vaso + todo lo servido), en gramos
+  heladoG: 0,
+};
+const LS_PEDIDO = "tutis_pedido_en_curso";
+const LS_ANULACIONES = "tutis_pending_voids";
+
+function hayPesado() {
+  if (PESO.modo === "bascula") return PESO.capturas.length > 0;
+  return (parseFloat($("inp-ice-weight").value) || 0) > 0 || orderRows.some((r) => r.weight > 0);
+}
 
 function wireUnitToggle(containerId, getUnit, setUnit, inputId) {
   $(containerId).addEventListener("click", (e) => {
@@ -520,9 +555,7 @@ function wireUnitToggle(containerId, getUnit, setUnit, inputId) {
     renderQuote();
   });
 }
-wireUnitToggle("unit-ice",   () => iceUnit,   (u) => (iceUnit = u),   "inp-ice-weight");
-wireUnitToggle("unit-cup",   () => cupUnit,   (u) => (cupUnit = u),   "inp-cup-weight");
-wireUnitToggle("unit-total", () => totalUnit, (u) => (totalUnit = u), "inp-total-weight");
+wireUnitToggle("unit-ice", () => iceUnit, (u) => (iceUnit = u), "inp-ice-weight");
 
 function fillSaleSelectors() {
   const cupSel = $("sel-cup"), spoonSel = $("sel-spoon"), flavorSel = $("sel-flavor");
@@ -531,7 +564,7 @@ function fillSaleSelectors() {
   cupSel.innerHTML = ""; spoonSel.innerHTML = ""; flavorSel.innerHTML = "";
   STATE.supplies.filter((s) => s.kind === "vaso").forEach((s) => {
     const o = document.createElement("option");
-    o.value = s.id; o.textContent = `${s.name} (tara ${s.tare_weight_g}g)`;
+    o.value = s.id; o.textContent = s.name;
     cupSel.appendChild(o);
   });
   STATE.supplies.filter((s) => s.kind === "cuchara").forEach((s) => {
@@ -554,35 +587,31 @@ function fillSaleSelectors() {
         ? `Precio único: ${money(Number(loc.price_per_gram) * OZ_TO_G)} por onza`
         : `Precio único: ${money(loc.price_per_gram)} por gramo`)
     : "";
-  prefillCupWeight();
+  pintarTara();
 }
 
-// Pone los tres campos de peso en la unidad que eligió la tienda. Solo actúa
-// cuando la unidad cambió: si la cajera ya movió un botón a mano en plena
-// venta, no se lo pisamos.
+// La unidad de la tienda solo importa para teclear a mano; lo que viene de
+// la báscula ya llega en gramos. Solo actúa cuando la unidad cambió: si la
+// cajera ya movió el botón a mano en plena venta, no se lo pisamos.
 let unidadAplicada = null;
 function aplicarUnidadPreferida() {
   const u = prefUnit();
   if (u === unidadAplicada) return;
   unidadAplicada = u;
-  iceUnit = u; cupUnit = u; totalUnit = u;
+  iceUnit = u;
   markUnitButtons("unit-ice", u);
-  markUnitButtons("unit-cup", u);
-  markUnitButtons("unit-total", u);
-  $("inp-cup-weight").dataset.auto = "1";
 }
 
-function prefillCupWeight() {
+// La tara es la del catálogo. Antes se podía teclear, y una tara inflada
+// es peso que se le resta al cliente sin que nadie lo note.
+function pintarTara() {
   const cup = STATE.supplies.find((s) => s.id === $("sel-cup").value);
-  const input = $("inp-cup-weight");
-  if (cup && (!input.value || input.dataset.auto === "1")) {
-    input.value = cupUnit === "oz" ? r2(toOz(cup.tare_weight_g)) : cup.tare_weight_g;
-    input.dataset.auto = "1";
-  }
+  $("cup-tare-hint").textContent = cup
+    ? `Tara del vaso: ${fmtWeight(Number(cup.tare_weight_g) || 0)}. Sale del catálogo; se descuenta sola.`
+    : "";
 }
-$("inp-cup-weight").addEventListener("input", function () { this.dataset.auto = "0"; renderQuote(); });
-$("sel-cup").addEventListener("change", () => { $("inp-cup-weight").dataset.auto = "1"; prefillCupWeight(); renderQuote(); });
-["inp-ice-weight", "inp-total-weight"].forEach((id) => $(id).addEventListener("input", renderQuote));
+$("sel-cup").addEventListener("change", () => { pintarTara(); renderQuote(); });
+$("inp-ice-weight").addEventListener("input", renderQuote);
 ["sel-flavor", "sel-spoon", "chk-spoon"].forEach((id) => $(id).addEventListener("change", renderQuote));
 
 function renderToppingChips() {
@@ -594,7 +623,7 @@ function renderToppingChips() {
     chip.className = "chip" + (t.tier === 2 ? " tier2" : "");
     chip.innerHTML = `${esc(t.name)}<span class="chip-cat">${esc(t.category)}</span>`;
     chip.addEventListener("click", () => {
-      orderRows.push({ rowId: "r" + Date.now() + Math.random(), toppingId: t.id, weight: 0, unit: prefUnit() });
+      orderRows.push({ rowId: "r" + Date.now() + Math.random(), toppingId: t.id, weight: 0, unit: prefUnit(), pesadoG: null });
       renderOrderRows(); renderQuote();
     });
     wrap.appendChild(chip);
@@ -604,6 +633,7 @@ function renderToppingChips() {
 function renderOrderRows() {
   const wrap = $("order-rows");
   wrap.innerHTML = "";
+  const manual = PESO.modo === "manual";
   orderRows.forEach((row) => {
     const div = document.createElement("div");
     div.className = "order-row";
@@ -615,30 +645,54 @@ function renderOrderRows() {
       if (t.id === row.toppingId) o.selected = true;
       select.appendChild(o);
     });
-    select.addEventListener("change", () => { row.toppingId = select.value; renderQuote(); });
+    select.addEventListener("change", () => { row.toppingId = select.value; guardarPedido(); renderQuote(); });
 
-    const weightInput = document.createElement("input");
-    weightInput.type = "number"; weightInput.min = "0"; weightInput.step = "0.1";
-    weightInput.placeholder = "peso"; weightInput.value = row.weight || "";
-    weightInput.addEventListener("input", () => { row.weight = parseFloat(weightInput.value) || 0; renderQuote(); });
+    let peso, accion;
+    if (manual) {
+      peso = document.createElement("input");
+      peso.type = "number"; peso.min = "0"; peso.step = "0.1";
+      peso.placeholder = "peso"; peso.value = row.weight || "";
+      peso.addEventListener("input", () => { row.weight = parseFloat(peso.value) || 0; renderQuote(); });
+      accion = document.createElement("select");
+      ["g", "oz"].forEach((u) => {
+        const o = document.createElement("option");
+        o.value = u; o.textContent = u; if (u === row.unit) o.selected = true;
+        accion.appendChild(o);
+      });
+      accion.addEventListener("change", () => { row.unit = accion.value; renderQuote(); });
+    } else {
+      peso = document.createElement("span");
+      peso.className = "weigh-value num";
+      peso.textContent = row.pesadoG == null ? "—" : fmtWeightShort(row.pesadoG);
+      if (row.pesadoG == null) {
+        accion = document.createElement("button");
+        accion.type = "button"; accion.className = "btn primary small"; accion.textContent = "⚖ Pesar";
+        accion.addEventListener("click", () => pesar("topping", row, accion));
+      } else {
+        accion = document.createElement("span");
+        accion.className = "weigh-lock"; accion.textContent = "fijo";
+        accion.title = "Pesado en la báscula. No se puede cambiar.";
+      }
+    }
 
-    const unitSel = document.createElement("select");
-    ["g", "oz"].forEach((u) => {
-      const o = document.createElement("option");
-      o.value = u; o.textContent = u; if (u === row.unit) o.selected = true;
-      unitSel.appendChild(o);
-    });
-    unitSel.addEventListener("change", () => { row.unit = unitSel.value; renderQuote(); });
+    // Lo ya pesado no se quita: se anula el pedido completo, y eso queda
+    // registrado. Quitar una línea suelta es exactamente lo que se veía en
+    // el sistema anterior ("1.5 Bubble Pop" y luego "-1.5 Bubble Pop").
+    let removeBtn;
+    if (manual || row.pesadoG == null) {
+      removeBtn = document.createElement("button");
+      removeBtn.className = "row-remove"; removeBtn.textContent = "✕"; removeBtn.type = "button";
+      removeBtn.title = "Quitar";
+      removeBtn.addEventListener("click", () => {
+        const i = orderRows.indexOf(row);
+        if (i >= 0) orderRows.splice(i, 1);
+        renderOrderRows(); renderQuote();
+      });
+    } else {
+      removeBtn = document.createElement("span");
+    }
 
-    const removeBtn = document.createElement("button");
-    removeBtn.className = "row-remove"; removeBtn.textContent = "✕"; removeBtn.type = "button";
-    removeBtn.addEventListener("click", () => {
-      const i = orderRows.indexOf(row);
-      if (i >= 0) orderRows.splice(i, 1);
-      renderOrderRows(); renderQuote();
-    });
-
-    div.append(select, weightInput, unitSel, removeBtn);
+    div.append(select, peso, accion, removeBtn);
     wrap.appendChild(div);
   });
 }
@@ -651,15 +705,16 @@ function buildPlan() {
   const spoonRow = $("chk-spoon").checked ? STATE.supplies.find((s) => s.id === $("sel-spoon").value) : null;
   if (!flavor || !cupRow) return null;
 
-  const cupWeightG = toGrams(parseFloat($("inp-cup-weight").value) || 0, cupUnit);
-  const iceWeightG = toGrams(parseFloat($("inp-ice-weight").value) || 0, iceUnit);
+  const manual = PESO.modo === "manual";
+  const cupWeightG = Number(cupRow.tare_weight_g) || 0;
+  const iceWeightG = manual ? toGrams(parseFloat($("inp-ice-weight").value) || 0, iceUnit) : PESO.heladoG;
 
   const toppings = orderRows.map((row) => {
     const t = STATE.toppings.find((x) => x.id === row.toppingId);
     if (!t) return null;
-    return { id: t.id, name: t.name, weight_g: toGrams(row.weight, row.unit),
+    return { id: t.id, name: t.name, weight_g: manual ? toGrams(row.weight, row.unit) : (row.pesadoG || 0),
              cost_per_gram: Number(t.cost_per_gram), tier: t.tier, surcharge_per_gram: Number(t.surcharge_per_gram) };
-  }).filter(Boolean);
+  }).filter((t) => t && t.weight_g > 0);   // una línea todavía sin pesar no va al ticket
 
   return {
     loc, flavorRow: flavor, cupRow, spoonRow, cupWeightG, iceWeightG, toppings,
@@ -674,6 +729,245 @@ function buildPlan() {
     },
   };
 }
+
+/* --- Pesar ------------------------------------------------------------------ */
+async function pesar(que, row, boton) {
+  const plan = buildPlan();
+  if (!plan) { alert("Selecciona vaso y sabor."); return; }
+  if (que === "topping" && !(PESO.heladoG > 0)) {
+    pintarEstadoBascula("Primero pesa el helado: los toppings se pesan sobre el mismo vaso, después.", true);
+    return;
+  }
+  if (boton) boton.disabled = true;
+  let l;
+  try {
+    l = await balanza.capturar(4000);
+  } catch (e) {
+    pintarEstadoBascula(e.message, true);
+    if (boton) boton.disabled = false;
+    return;
+  }
+  if (boton) boton.disabled = false;
+
+  const tara = plan.cupWeightG;
+  const base = PESO.ultimoBruto == null ? tara : PESO.ultimoBruto;
+  const neto = r2(l.gramos - base);
+  if (neto <= 0) {
+    pintarEstadoBascula(PESO.ultimoBruto == null
+      ? `La báscula marca ${fmtWeightShort(l.gramos)}: no más que el vaso vacío (${fmtWeightShort(tara)}). ¿Está el vaso servido sobre la báscula?`
+      : `La báscula marca ${fmtWeightShort(l.gramos)}: no más que la pesada anterior (${fmtWeightShort(PESO.ultimoBruto)}). Sirve el topping sobre el mismo vaso, sin quitarlo.`, true);
+    return;
+  }
+
+  let nombre;
+  if (que === "helado") {
+    if (PESO.heladoG > 0) return;
+    PESO.heladoG = neto;
+    nombre = plan.flavorRow.name;
+  } else {
+    if (row.pesadoG != null) return;
+    row.pesadoG = neto;
+    const t = STATE.toppings.find((x) => x.id === row.toppingId);
+    nombre = t ? t.name : "topping";
+  }
+  PESO.ultimoBruto = l.gramos;
+  PESO.capturas.push({ que: nombre, neto_g: neto, g: l.gramos, crudo: l.crudo, at: new Date(l.at).toISOString() });
+  pintarEstadoBascula(`${nombre}: ${fmtWeight(neto)} — fijo.`, false);
+  guardarPedido();
+  pintarModo();
+  renderOrderRows();
+  renderQuote();
+}
+$("btn-weigh-ice").addEventListener("click", () => pesar("helado", null, $("btn-weigh-ice")));
+
+function guardarPedido() {
+  if (PESO.modo !== "bascula" || !PESO.capturas.length) return;
+  lsSet(LS_PEDIDO, armarAnulacion(null));
+}
+
+// Lo que se mostraría si el pedido se anulara ahora: qué se pesó y cuánto.
+function armarAnulacion(motivo) {
+  const plan = buildPlan();
+  const items = [];
+  if (plan && plan.iceWeightG > 0) items.push({ n: plan.flavorRow.name, g: r2(plan.iceWeightG) });
+  if (plan) plan.toppings.forEach((t) => { if (t.weight_g > 0) items.push({ n: t.name, g: r2(t.weight_g) }); });
+  const previo = lsGet(LS_PEDIDO, null);
+  return {
+    location_id: STATE.activeLocationId,
+    client_uuid: (previo && previo.client_uuid) || (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`),
+    created_at: new Date().toISOString(),
+    weighed_g: r2(items.reduce((s, i) => s + i.g, 0)),
+    items,
+    scale_log: PESO.modo === "bascula" ? PESO.capturas : null,
+    reason: motivo,
+    manual: PESO.modo === "manual",
+  };
+}
+
+function limpiarPedido() {
+  PESO.capturas = [];
+  PESO.ultimoBruto = null;
+  PESO.heladoG = 0;
+  orderRows.length = 0;
+  $("inp-ice-weight").value = "";
+  try { localStorage.removeItem(LS_PEDIDO); } catch (e) {}
+  pintarModo();
+  renderOrderRows();
+  renderQuote();
+}
+
+/* --- Anular un pedido ------------------------------------------------------- */
+async function registrarAnulacion(payload) {
+  const { manual, ...datos } = payload;
+  if (manual) datos.reason = `[pesos a mano] ${datos.reason}`;
+  try {
+    if (!navigator.onLine || !sb) throw new Error("offline");
+    const { error } = await sb.rpc("registrar_anulacion", { payload: datos });
+    if (error) throw error;
+  } catch (e) {
+    // Como las ventas: si no se pudo enviar, se guarda y se manda después.
+    const cola = lsGet(LS_ANULACIONES, []);
+    if (!cola.some((x) => x.client_uuid === datos.client_uuid)) cola.push(datos);
+    lsSet(LS_ANULACIONES, cola);
+  }
+}
+
+async function syncAnulaciones() {
+  const cola = lsGet(LS_ANULACIONES, []);
+  if (!cola.length || !sb || !navigator.onLine) return;
+  const quedan = [];
+  for (const p of cola) {
+    try {
+      const { error } = await sb.rpc("registrar_anulacion", { payload: { ...p, synced_offline: true } });
+      if (error && (/network|fetch/i.test(error.message || "") || !error.code)) quedan.push(p);
+      else if (error) console.error("Anulación rechazada al sincronizar:", error.message, p);
+    } catch (e) {
+      quedan.push(p);
+    }
+  }
+  lsSet(LS_ANULACIONES, quedan);
+}
+
+// Un pedido pesado que quedó a medias porque se recargó o se cerró la caja.
+async function recuperarPedidoAbandonado() {
+  const p = lsGet(LS_PEDIDO, null);
+  if (!p || !p.items || !p.items.length) { try { localStorage.removeItem(LS_PEDIDO); } catch (e) {} return; }
+  await registrarAnulacion({ ...p, reason: "La caja se recargó o se cerró con un pedido pesado sin cobrar" });
+  try { localStorage.removeItem(LS_PEDIDO); } catch (e) {}
+}
+
+$("btn-void-order").addEventListener("click", async () => {
+  if (!hayPesado()) { limpiarPedido(); return; }
+  const motivo = prompt("¿Por qué se anula este pedido ya pesado?\nQueda registrado con tu nombre y la gerente lo verá.");
+  if (motivo === null) return;
+  await registrarAnulacion(armarAnulacion(motivo.trim() || "(sin motivo)"));
+  limpiarPedido();
+});
+
+/* --- Pesos a mano, con PIN de la gerente -------------------------------------
+   Para cuando la báscula falla: la venta no se detiene, pero la gerente ve
+   los pesos tecleados y los aprueba con su PIN. El PIN se valida en el
+   servidor (nunca aquí) y la autorización cubre exactamente ese peso y una
+   sola venta. Sin internet no hay cómo validar el PIN: se puede cobrar
+   igual, y la venta queda marcada "a mano SIN autorizar" en el reporte. */
+function pintarModo() {
+  const manual = PESO.modo === "manual";
+  $("manual-banner").hidden = !manual;
+  $("btn-manual-mode").hidden = manual;
+  $("out-ice-weight").hidden = manual;
+  $("btn-weigh-ice").hidden = manual || PESO.heladoG > 0;
+  $("inp-ice-weight").hidden = !manual;
+  $("unit-ice").hidden = !manual;
+  $("out-ice-weight").textContent = PESO.heladoG > 0 ? `${fmtWeight(PESO.heladoG)} · fijo` : "—";
+  $("out-ice-weight").classList.toggle("locked", PESO.heladoG > 0);
+  // Con algo ya pesado, la tara no puede cambiar: cambiaría lo que se cobra.
+  $("sel-cup").disabled = !manual && PESO.capturas.length > 0;
+  $("weigh-hint").innerHTML = manual
+    ? "Teclea los pesos. Al cobrar, una gerente los revisa y autoriza con su PIN."
+    : "Pon el vaso con el helado en la báscula y presiona <strong>Pesar</strong>. Lo pesado queda fijo.";
+}
+
+$("btn-manual-mode").addEventListener("click", () => {
+  if (PESO.capturas.length) {
+    alert("Este pedido ya tiene pesos de la báscula. Cóbralo o anúlalo antes de pasar a pesos a mano.");
+    return;
+  }
+  if (!confirm("¿Pasar a pesos a mano?\n\nAl cobrar se pedirá el PIN de una gerente, y la venta queda marcada en el reporte de control de pesos.")) return;
+  PESO.modo = "manual";
+  pintarModo(); renderOrderRows(); renderQuote();
+});
+$("btn-manual-exit").addEventListener("click", () => {
+  if (hayPesado() && !confirm("Se borran los pesos tecleados de este pedido. ¿Volver a la báscula?")) return;
+  PESO.modo = "bascula";
+  orderRows.forEach((r) => { r.weight = 0; r.pesadoG = null; });
+  $("inp-ice-weight").value = "";
+  pintarModo(); renderOrderRows(); renderQuote();
+});
+
+let resolverPin = null;
+function pedirAutorizacion(plan, pesadoG) {
+  return new Promise(async (resolve) => {
+    resolverPin = resolve;
+    const lineas = [];
+    if (plan.iceWeightG > 0) lineas.push([plan.flavorRow.name, plan.iceWeightG]);
+    plan.toppings.forEach((t) => { if (t.weight_g > 0) lineas.push([t.name, t.weight_g]); });
+    $("pin-summary").innerHTML = lineas.map(([n, g]) =>
+      `<div class="ticket-line"><span>${esc(n)}</span><span class="num">${esc(fmtWeight(g))}</span></div>`).join("") +
+      `<div class="ticket-line"><strong>Total tecleado</strong><strong class="num">${esc(fmtWeight(pesadoG))}</strong></div>`;
+    $("pin-code").value = "";
+    $("pin-msg").textContent = "Cargando…";
+    $("pin-reason").value = $("pin-reason").options[0].value;
+    $("pin-reason-other").hidden = true;
+    $("btn-pin-ok").disabled = true;
+    $("pin-modal").hidden = false;
+
+    const { data, error } = await sb.rpc("gerentes_para_autorizar", { p_location_id: STATE.activeLocationId });
+    const sel = $("pin-manager");
+    sel.innerHTML = "";
+    (data || []).forEach((g) => {
+      const o = document.createElement("option");
+      o.value = g.id; o.textContent = g.full_name; sel.appendChild(o);
+    });
+    if (error) {
+      $("pin-msg").textContent = "No se pudo consultar quién autoriza. Revisa la conexión.";
+    } else if (!(data || []).length) {
+      $("pin-msg").textContent = "Ninguna gerente de esta tienda tiene PIN todavía. Se crea en Configuración → Mi PIN de autorización.";
+    } else {
+      $("pin-msg").textContent = "";
+      $("btn-pin-ok").disabled = false;
+      $("pin-code").focus();
+    }
+    $("pin-modal").dataset.peso = String(pesadoG);
+  });
+}
+function cerrarPin(resultado) {
+  $("pin-modal").hidden = true;
+  $("pin-code").value = "";
+  const r = resolverPin; resolverPin = null;
+  if (r) r(resultado);
+}
+$("pin-reason").addEventListener("change", () => {
+  $("pin-reason-other").hidden = $("pin-reason").value !== "otro";
+  if (!$("pin-reason-other").hidden) $("pin-reason-other").focus();
+});
+$("btn-pin-cancel").addEventListener("click", () => cerrarPin(null));
+$("pin-code").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("btn-pin-ok").click(); } });
+$("btn-pin-ok").addEventListener("click", async () => {
+  const pin = $("pin-code").value.trim();
+  const motivo = $("pin-reason").value === "otro" ? $("pin-reason-other").value.trim() : $("pin-reason").value;
+  if (!/^\d{4,8}$/.test(pin)) { $("pin-msg").textContent = "El PIN son de 4 a 8 números."; return; }
+  if (motivo.length < 3) { $("pin-msg").textContent = "Escribe el motivo."; return; }
+  const btn = $("btn-pin-ok"); btn.disabled = true;
+  $("pin-msg").textContent = "Verificando…";
+  const { data, error } = await sb.rpc("autorizar_peso_manual", {
+    p_location_id: STATE.activeLocationId, p_manager_id: $("pin-manager").value, p_pin: pin,
+    p_weight_g: Number($("pin-modal").dataset.peso), p_reason: motivo,
+  });
+  btn.disabled = false;
+  if (error) { $("pin-msg").textContent = error.message; return; }
+  if (!data || !data.ok) { $("pin-msg").textContent = (data && data.error) || "No se pudo autorizar."; $("pin-code").value = ""; return; }
+  cerrarPin({ id: data.id, nombre: data.authorized_by_name });
+});
 
 /* --- Cliente frecuente -----------------------------------------------------
    Ganar puntos funciona sin internet: el id del cliente viaja en la venta y
@@ -827,13 +1121,8 @@ function renderQuote() {
 
   const result = computeSale(plan.args);
   const tareG = plan.cupWeightG, iceG = plan.iceWeightG;
-  const toppingsFromRows = result.gross_weight_g - iceG - tareG;
-
-  const scaleInput = parseFloat($("inp-total-weight").value) || 0;
-  const scaleTotalG = scaleInput > 0 ? toGrams(scaleInput, totalUnit) : 0;
-  const usingScale = scaleTotalG > 0;
-  const toppingsG = usingScale ? r2(scaleTotalG - iceG - tareG) : r2(toppingsFromRows);
-  const displayedTotalG = usingScale ? r2(scaleTotalG) : result.gross_weight_g;
+  const toppingsG = r2(result.gross_weight_g - iceG - tareG);
+  const manual = PESO.modo === "manual";
 
   linesEl.innerHTML = result.lines.map((l) => `
     <div class="ticket-line">
@@ -844,10 +1133,11 @@ function renderQuote() {
     </div>`).join("");
 
   totalsEl.innerHTML = `
-    <div><span>Peso del vaso</span><span class="num">${fmtWeightShort(tareG)}</span></div>
+    <div><span>Peso del vaso (tara)</span><span class="num">${fmtWeightShort(tareG)}</span></div>
     <div><span>Peso del helado</span><span class="num">${fmtWeightShort(iceG)}</span></div>
-    <div><span>Peso de toppings${usingScale ? " (calculado)" : ""}</span><span class="num">${fmtWeightShort(toppingsG)}</span></div>
-    <div><span>Peso total</span><span class="num">${fmtWeight(displayedTotalG)}</span></div>
+    <div><span>Peso de toppings</span><span class="num">${fmtWeightShort(toppingsG)}</span></div>
+    <div><span>Peso total</span><span class="num">${fmtWeight(result.gross_weight_g)}</span></div>
+    <div><span>Origen del peso</span><span>${manual ? "A mano — requiere PIN" : (PESO.capturas.length ? "Báscula · fijo" : "Báscula")}</span></div>
     <div><span>Costo real</span><span class="num">${money(result.total_cost)}</span></div>
     <div><span>Margen</span><span class="num">${money(result.margin)} (${result.margin_pct}%)</span></div>
     <div class="tt-total"><span>Total</span><span class="num">${money(result.total_price)}</span></div>`;
@@ -864,9 +1154,6 @@ function renderQuote() {
   pintarPreviaPuntos(previaFidelizacion(result.total_price), result.total_price);
 
   const alerts = [...result.alerts];
-  if (usingScale && Math.abs(scaleTotalG - result.gross_weight_g) > 0.5) {
-    alerts.unshift(`La báscula marca ${fmtWeightShort(scaleTotalG)}, pero vaso + helado + toppings registrados suman ${fmtWeightShort(result.gross_weight_g)} (diferencia de ${fmtWeightShort(Math.abs(scaleTotalG - result.gross_weight_g))}). Revisa antes de cobrar.`);
-  }
   alertsEl.innerHTML = alerts.map((a) => `<div class="alert warn">${esc(a)}</div>`).join("");
 }
 
@@ -890,8 +1177,14 @@ $("btn-charge").addEventListener("click", () => chargeSale(false));
 async function chargeSale(force) {
   const plan = buildPlan();
   if (!plan) { alert("Selecciona vaso y sabor."); return; }
+  const manual = PESO.modo === "manual";
+  if (!manual) {
+    const sinPesar = orderRows.filter((r) => r.pesadoG == null)
+      .map((r) => (STATE.toppings.find((t) => t.id === r.toppingId) || {}).name || "topping");
+    if (sinPesar.length) { alert(`Falta pesar: ${sinPesar.join(", ")}.\n\nPésalo o quítalo de la lista.`); return; }
+  }
   const result = computeSale(plan.args);
-  if (result.total_price <= 0) { alert("La venta está en cero: pesa el helado o los toppings."); return; }
+  if (result.total_price <= 0) { alert(manual ? "La venta está en cero: teclea el peso del helado o de los toppings." : "La venta está en cero: pesa el helado."); return; }
 
   const warnings = [];
   if (plan.flavorRow.stock_grams < plan.iceWeightG) warnings.push(`Stock insuficiente de "${plan.flavorRow.name}".`);
@@ -902,6 +1195,23 @@ async function chargeSale(force) {
   if (plan.cupRow.stock_qty < 1) warnings.push(`No hay vasos disponibles (${plan.cupRow.name}).`);
   if (warnings.length && !force) {
     if (!confirm(warnings.join("\n") + "\n\n¿Registrar la venta de todos modos?")) return;
+  }
+
+  // De dónde salió el peso. El servidor lo revisa y clasifica la venta; lo
+  // que se manda aquí es la evidencia, no la conclusión.
+  let peso;
+  const pesadoG = r2(plan.iceWeightG + plan.toppings.reduce((s, t) => s + t.weight_g, 0));
+  if (!manual) {
+    peso = { weight_mode: "bascula", scale_gross_g: PESO.ultimoBruto, scale_log: PESO.capturas };
+  } else if (pesadoG <= 0) {
+    peso = { weight_mode: "manual" };
+  } else if (!navigator.onLine) {
+    if (!confirm("Sin internet no se puede validar el PIN de la gerente.\n\nLa venta se registra igual, pero queda marcada como \"peso a mano SIN autorizar\" y la gerente la verá en el reporte.\n\n¿Cobrar así?")) return;
+    peso = { weight_mode: "manual_sin_conexion" };
+  } else {
+    const auth = await pedirAutorizacion(plan, pesadoG);
+    if (!auth) return;
+    peso = { weight_mode: "manual", weight_auth_id: auth.id };
   }
 
   const btn = $("btn-charge");
@@ -918,6 +1228,7 @@ async function chargeSale(force) {
     customer_name: $("inp-customer-name").value || null,
     customer_tax_id: $("inp-customer-taxid").value || null,
     lines: result.lines,
+    ...peso,
   };
 
   // Al servidor se le dice QUÉ cliente y CUÁNTOS PUNTOS quiere canjear. El
@@ -959,15 +1270,9 @@ async function chargeSale(force) {
   discountLocalStock(plan, result);
   if (LOY.cliente) quitarCliente();
 
-  $("inp-ice-weight").value = "";
-  $("inp-total-weight").value = "";
   $("inp-customer-name").value = "";
   $("inp-customer-taxid").value = "";
-  orderRows.length = 0;
-  renderOrderRows();
-  $("inp-cup-weight").dataset.auto = "1";
-  prefillCupWeight();
-  renderQuote();
+  limpiarPedido();
   btn.disabled = false;
 
   if (!offline) await loadData();
@@ -1212,7 +1517,7 @@ function fillReportLocationPicker() {
   sel.value = keep || STATE.activeLocationId;
 }
 
-$("sel-report-location").addEventListener("change", () => { renderReports(); renderClosing(); });
+$("sel-report-location").addEventListener("change", () => { renderReports(); renderClosing(); cargarControlPesos(); });
 
 function reportScopeId() {
   if (!isOwner()) return STATE.activeLocationId;
@@ -1574,6 +1879,104 @@ $("btn-save-config").addEventListener("click", async () => {
   }
 });
 
+/* --- Mi PIN de autorización ---------------------------------------------------
+   El PIN se manda una vez a set_manager_pin, que lo guarda con bcrypt en un
+   esquema que la API no publica. Ni la gerente puede volver a leerlo. */
+async function pintarEstadoPin() {
+  if (!sb || !navigator.onLine) { $("pin-status").textContent = ""; return; }
+  const { data, error } = await sb.rpc("tengo_pin");
+  $("pin-status").textContent = error ? ""
+    : data ? "Ya tienes un PIN. Si guardas uno nuevo, reemplaza al anterior."
+           : "Todavía no tienes PIN: sin él no puedes autorizar pesos a mano.";
+}
+
+$("btn-save-pin").addEventListener("click", async () => {
+  const a = $("cfg-pin").value.trim(), b = $("cfg-pin2").value.trim(), msg = $("pin-saved");
+  if (!/^\d{4,8}$/.test(a)) { msg.textContent = "El PIN son de 4 a 8 números."; return; }
+  if (a !== b) { msg.textContent = "Los dos PIN no coinciden."; return; }
+  const btn = $("btn-save-pin"); btn.disabled = true;
+  const { error } = await sb.rpc("set_manager_pin", { p_pin: a });
+  btn.disabled = false;
+  $("cfg-pin").value = ""; $("cfg-pin2").value = "";
+  msg.textContent = error ? error.message : "PIN guardado.";
+  if (!error) { pintarEstadoPin(); setTimeout(() => (msg.textContent = ""), 3000); }
+});
+
+/* --- Reporte: control de pesos -------------------------------------------------
+   Una llamada por sucursal, igual que el tablero: el permiso se revisa en la
+   base tienda por tienda. En el consolidado del propietario, cada cajera va
+   con el nombre de su tienda. */
+const CLASE_PESO = {
+  bascula_no_cuadra: "Báscula: las líneas no suman lo pesado",
+  manual_autorizado: "Peso a mano, con PIN",
+  manual_sin_autorizar: "Peso a mano SIN PIN",
+  sin_dato: "Sin dato de la báscula",
+  anulacion: "Pedido pesado anulado",
+};
+
+async function cargarControlPesos() {
+  if (!sb || !canManage()) return;
+  if (!$("wc-from").value) {
+    const d = new Date(); d.setDate(d.getDate() - 6);
+    $("wc-from").value = localDateStr(d);
+    $("wc-to").value = localDateStr();
+  }
+  const scope = reportScopeId();
+  const locs = scope ? STATE.locations.filter((l) => l.id === scope) : STATE.locations.filter((l) => l.active);
+  const varias = locs.length > 1;
+  const filas = [], incidentes = [];
+  $("wc-alert").innerHTML = "";
+  for (const loc of locs) {
+    const { data, error } = await sb.rpc("control_pesos", {
+      p_location_id: loc.id, p_from: $("wc-from").value, p_to: $("wc-to").value,
+      p_utc_offset_hours: CFG.UTC_OFFSET_HOURS || -6,
+    });
+    if (error) {
+      $("wc-alert").innerHTML = `<div class="alert warn">No se pudo cargar el control de pesos. Si sigue pasando, avísale a soporte técnico.</div>`;
+      return;
+    }
+    const pref = varias ? `${loc.name} · ` : "";
+    (data.por_cajera || []).forEach((c) => filas.push({ ...c, cajera: pref + c.cajera }));
+    (data.incidentes || []).forEach((i) => incidentes.push({ ...i, cajera: pref + (i.cajera || "") }));
+  }
+
+  const pct = (n, d) => (d > 0 ? ` (${Math.round((100 * n) / d)} %)` : "");
+  const tb = document.querySelector("#table-wc-cashiers tbody");
+  tb.innerHTML = filas.length ? "" : '<tr><td colspan="7" class="hint">No hay ventas pesadas en esas fechas.</td></tr>';
+  filas.forEach((c) => {
+    const v = Number(c.ventas_pesadas) || 0;
+    const sinPin = Number(c.manual_sin_autorizar) || 0;
+    const raras = (Number(c.no_cuadra) || 0) + (Number(c.sin_dato) || 0);
+    const tr = document.createElement("tr");
+    if (sinPin || raras) tr.className = "row-bad";
+    tr.innerHTML = `<td>${esc(c.cajera)}</td>
+      <td class="num">${v}</td>
+      <td class="num">${esc(c.bascula)}${pct(Number(c.bascula) || 0, v)}</td>
+      <td class="num">${esc(c.manual_autorizado)}${pct(Number(c.manual_autorizado) || 0, v)}</td>
+      <td class="num">${sinPin}${pct(sinPin, v)}</td>
+      <td class="num">${raras}</td>
+      <td class="num">${esc(c.anulaciones)}${Number(c.gramos_anulados) > 0 ? ` · ${esc(fmtWeightShort(Number(c.gramos_anulados)))}` : ""}</td>`;
+    tb.appendChild(tr);
+  });
+
+  incidentes.sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+  const ti = document.querySelector("#table-wc-incidents tbody");
+  ti.innerHTML = incidentes.length ? "" : '<tr><td colspan="7" class="hint">Nada fuera de lo normal: todo salió de la báscula.</td></tr>';
+  incidentes.slice(0, 100).forEach((i) => {
+    const tr = document.createElement("tr");
+    if (i.clase !== "manual_autorizado") tr.className = "row-bad";
+    tr.innerHTML = `<td>${i.fecha ? esc(new Date(i.fecha).toLocaleString()) : ""}</td>
+      <td class="num">${i.folio == null ? "—" : esc(i.folio)}</td>
+      <td>${esc(i.cajera)}</td>
+      <td>${esc(CLASE_PESO[i.clase] || i.clase)}</td>
+      <td class="num">${esc(fmtWeightShort(Number(i.peso_g) || 0))}</td>
+      <td>${esc(i.autorizo || "—")}</td>
+      <td>${esc(i.motivo || "")}</td>`;
+    ti.appendChild(tr);
+  });
+}
+$("btn-wc-load").addEventListener("click", cargarControlPesos);
+
 /* ===========================================================================
    13. SUCURSALES Y USUARIOS (solo propietario)
    =========================================================================== */
@@ -1734,95 +2137,81 @@ $("btn-add-location").addEventListener("click", async () => {
 /* ===========================================================================
    14. BÁSCULA (Web Serial)
    ---------------------------------------------------------------------------
-   Funciona en Chrome o Edge sobre HTTPS. La primera vez, el navegador pide
-   permiso y hay que elegir el puerto de la báscula; después queda recordado.
-   La báscula debe estar en modo de salida continua ("PC mode" o similar).
-   El lector es tolerante: toma el primer número de cada línea que recibe, que
-   es lo que mandan la mayoría de básculas (Torrey, CAS, OHAUS y compatibles).
+   Funciona en Chrome o Edge sobre HTTPS; no en Safari ni en iPad. El
+   protocolo vive en bascula.js; aquí solo se conecta con la pantalla.
+   Al abrir la caja se reconecta sola con el puerto que ya tenía permiso (o
+   con todos, si el modo kiosko los autorizó por política). La primera vez en
+   una computadora nueva hay que presionar "Conectar báscula" y elegirla.
    =========================================================================== */
-const scale = { port: null, reader: null, lastWeight: null, reading: false };
+const balanza = window.Bascula.crear({
+  baudRate: CFG.SCALE_BAUD_RATE || 9600,
+  dataBits: CFG.SCALE_DATA_BITS || 7,
+  parity: CFG.SCALE_PARITY || "even",
+  stopBits: CFG.SCALE_STOP_BITS || 1,
+});
 
-function scaleSupported() { return "serial" in navigator; }
-
-async function connectScale() {
-  if (!scaleSupported()) {
-    $("scale-status").textContent = "Este navegador no puede leer la báscula. Usa Chrome o Edge en la computadora del mostrador.";
-    return false;
-  }
-  try {
-    scale.port = await navigator.serial.requestPort();
-    await scale.port.open({ baudRate: CFG.SCALE_BAUD_RATE || 9600 });
-    $("scale-status").textContent = "Báscula conectada.";
-    readScaleLoop();
-    return true;
-  } catch (e) {
-    $("scale-status").textContent = `No se pudo conectar la báscula: ${e.message}`;
-    return false;
-  }
+let mensajeBascula = null; // un aviso a la cajera tapa la lectura por unos segundos
+function pintarEstadoBascula(msg, esError) {
+  mensajeBascula = { msg, esError, hasta: Date.now() + (esError ? 6000 : 2500) };
+  pintarBascula();
 }
 
-async function readScaleLoop() {
-  if (!scale.port || scale.reading) return;
-  scale.reading = true;
-  const decoder = new TextDecoderStream();
-  scale.port.readable.pipeTo(decoder.writable).catch(() => {});
-  const reader = decoder.readable.getReader();
-  scale.reader = reader;
-  let buffer = "";
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += value;
-      const lines = buffer.split(/[\r\n]+/);
-      buffer = lines.pop() || "";
-      lines.forEach((line) => {
-        const m = line.match(/-?\d+(?:\.\d+)?/);
-        if (m) {
-          scale.lastWeight = parseFloat(m[0]);
-          const unit = /oz/i.test(line) ? "oz" : "g";
-          $("scale-status").textContent = `Báscula: ${scale.lastWeight} ${unit}`;
-          scale.lastUnit = unit;
-        }
-      });
-    }
-  } catch (e) {
-    $("scale-status").textContent = `Se perdió la lectura de la báscula: ${e.message}`;
-  } finally {
-    scale.reading = false;
-  }
-}
-
-async function captureWeightInto(inputId, unitContainerId, setUnit) {
-  if (!scale.port) {
-    const ok = await connectScale();
-    if (!ok) return;
-    await new Promise((r) => setTimeout(r, 800));
-  }
-  if (scale.lastWeight == null) {
-    $("scale-status").textContent = "Todavía no llega lectura de la báscula. Verifica que esté encendida y en modo de salida continua.";
+function pintarBascula() {
+  const lectura = $("scale-reading"), estado = $("scale-status");
+  const l = balanza.ultima;
+  $("btn-scale-connect").hidden = balanza.conectada || !balanza.soportada();
+  if (!balanza.soportada()) {
+    lectura.textContent = "—";
+    estado.textContent = "Este navegador no puede leer la báscula. Usa Chrome en la computadora de la caja; mientras tanto, los pesos van a mano con PIN.";
     return;
   }
-  $(inputId).value = scale.lastWeight;
-  if (scale.lastUnit) {
-    document.querySelectorAll(`#${unitContainerId} button`).forEach((b) => {
-      b.classList.toggle("active", b.dataset.unit === scale.lastUnit);
-    });
-    setUnit(scale.lastUnit);
+  if (!balanza.conectada) {
+    lectura.textContent = "—";
+  } else if (!l || Date.now() - l.at > 1500) {
+    lectura.textContent = "…";
+  } else if (l.gramos == null) {
+    lectura.textContent = balanza.ultimoEstado && balanza.ultimoEstado.sobrecarga ? "Sobrecarga" : "En movimiento";
+  } else {
+    lectura.textContent = fmtWeight(l.gramos);
   }
-  $(inputId).dataset.auto = "0";
-  renderQuote();
+  lectura.classList.toggle("moving", !!(l && !l.estable));
+
+  if (mensajeBascula && Date.now() < mensajeBascula.hasta) {
+    estado.textContent = mensajeBascula.msg;
+    estado.classList.toggle("bad", mensajeBascula.esError);
+    return;
+  }
+  estado.classList.remove("bad");
+  if (!balanza.conectada) { estado.textContent = "Sin conectar"; return; }
+  if (!l || Date.now() - l.at > 1500) { estado.textContent = "Conectada, esperando lectura…"; return; }
+  let t = l.estable ? "Estable" : "Moviéndose";
+  if (l.estado && l.estado.tara) t += " · TARA puesta";
+  if (PESO.ultimoBruto != null && l.gramos != null) {
+    const d = r2(l.gramos - PESO.ultimoBruto);
+    t += ` · ${d >= 0 ? "+" : ""}${fmtWeightShort(d)} desde la última pesada`;
+  }
+  estado.textContent = t;
 }
+balanza.escuchar(pintarBascula);
+setInterval(pintarBascula, 1000);
 
-$("btn-scale-ice").addEventListener("click", () => captureWeightInto("inp-ice-weight", "unit-ice", (u) => (iceUnit = u)));
-$("btn-scale-total").addEventListener("click", () => captureWeightInto("inp-total-weight", "unit-total", (u) => (totalUnit = u)));
+$("btn-scale-connect").addEventListener("click", async () => {
+  try {
+    await balanza.elegir();
+    pintarEstadoBascula("Báscula conectada.", false);
+  } catch (e) {
+    if (e && e.name === "NotFoundError") return; // cerró el selector sin elegir
+    pintarEstadoBascula(`No se pudo conectar la báscula: ${e.message}`, true);
+  }
+});
 
-if (!scaleSupported()) {
-  $("btn-scale-ice").hidden = true;
-  $("btn-scale-total").hidden = true;
+if (balanza.soportada()) {
+  navigator.serial.addEventListener("connect", () => balanza.auto().then(pintarBascula));
+  navigator.serial.addEventListener("disconnect", () => { balanza.cerrar().then(pintarBascula); });
+  balanza.auto().then(pintarBascula).catch(() => pintarBascula());
+} else {
+  pintarBascula();
 }
-
-
 
 /* ===========================================================================
    MOTOR DE GRÁFICAS (SVG a mano)

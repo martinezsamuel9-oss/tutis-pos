@@ -61,14 +61,20 @@ sql/05_endurecimiento.sql   validación en process_sale + rastro de auditoría
 sql/06_ventas_por_hora.sql  dashboard_summary devuelve además ventas por hora
 sql/07_cierre_automatico.sql daily_closing_all() + bitácora de correos
 sql/08_fidelizacion.sql     clientes, puntos, canje y carnet público
+sql/09_wallet_avisos.sql    avisos a Wallet cuando cambia un saldo (pg_net)
+sql/10_peso_fijo.sql        el peso lo pone la báscula: PIN de gerente, autorizaciones,
+                            clasificación de cada venta y pedidos anulados
 cierre-diario/      Worker programado que manda el cierre (ver su LEEME.md)
 wallet/             Worker de pases de Apple/Google Wallet en wallet.slabblu.com (ver su LEEME.md)
 wallet/secretos/    llave y certificado de Apple — GITIGNORADO, nunca al repo
 sql/pruebas/        prueba_aislamiento.sql (13) + prueba_seguridad.sql (48 ataques)
-                    + prueba_fidelizacion.sql (19)
+                    + prueba_fidelizacion.sql (19) + prueba_pesos.sql (48)
                     + datos_de_demostracion.sql (14 días de ventas, borrables)
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
 web/app.js          toda la lógica (17 secciones numeradas)
+web/bascula.js      protocolo de la báscula (CAS PD-II en NCI); se prueba en Node
+caja/               modo kiosko de Chrome + cómo configurar la báscula (ver su LEEME.md)
+pruebas-web/        pruebas de la pantalla de venta con Playwright y báscula simulada
 web/styles.css      estilos, modo día/noche
 web/config.js       credenciales — ÚNICO archivo que el dueño edita
 web/sw.js           service worker: app shell offline
@@ -324,6 +330,54 @@ Vive en `cierre-diario/`, un Worker de Cloudflare con disparador de reloj.
 8. **Un correo ya enviado no se repite**: índice único por día, sucursal y
    destinatario en `closing_email_log`.
 
+## 3.4 Lo pesado queda fijo (báscula, PIN y kiosko)
+
+Pedido del dueño (2026-10-07): en el sistema anterior la cajera leía la CAS y
+TECLEABA el peso, y se veían líneas que se ponían y se quitaban. Regla: lo
+pesado no se cambia. Lo que no hay que deshacer:
+
+1. **El peso no se teclea.** El campo de peso solo aparece en modo "a mano".
+   En modo báscula hay botón *Pesar*, y solo acepta una lectura ESTABLE y de
+   menos de 1 s (la PD-II avisa movimiento en sus bytes de estado).
+2. **Todo se pesa sobre el mismo vaso, de forma acumulada.** Helado = primera
+   lectura − tara; cada topping = lo que subió desde la lectura anterior. Por
+   eso el helado va primero, y el vaso no se puede cambiar después de pesar.
+3. **La tara sale del catálogo** (`supplies.tare_weight_g`), ya no hay campo
+   para teclearla. Una tara inflada es peso que se le roba al cliente.
+4. **Una línea pesada no se borra.** Se anula el pedido completo y queda en
+   `order_voids` con nombre, motivo y peso. El pedido en curso vive en
+   `localStorage` (`tutis_pedido_en_curso`): recargar la caja para tirarlo lo
+   registra como anulado al volver. Las anulaciones tienen su propia cola
+   offline (`tutis_pending_voids`).
+5. **El servidor CLASIFICA, nunca rechaza** (`sales.weight_source`): bascula,
+   bascula_no_cuadra (las líneas no suman la lectura bruta, ±1 g),
+   manual_autorizado, manual_sin_autorizar, sin_dato, no_aplica. Rechazar haría
+   que la cola offline descartara una venta que sí ocurrió (misma regla que
+   los puntos). Las ventas anteriores a sql/10 quedan con NULL y el reporte no
+   las cuenta.
+6. **El PIN se valida en el servidor**, con bcrypt, en `privado.manager_pins`
+   (esquema que la API no publica; ni la gerente lee su hash). La cajera ELIGE
+   a la gerente y la gerente teclea el PIN: así dos PIN iguales no se
+   confunden y nadie descubre el de otra intentando ponerse el mismo.
+7. **`autorizar_peso_manual` devuelve `{ok:false}` en vez de lanzar excepción
+   con PIN malo.** Si lanzara, la transacción desharía también el registro del
+   intento fallido y el tope (5 fallos en 15 min, por cajera Y por gerente)
+   no contaría nada. Efecto conocido: una cajera puede bloquear 15 min el PIN
+   de una gerente a propósito; queda anotado y puede autorizar otra persona.
+8. **La autorización cubre el peso exacto y una sola venta.** process_sale la
+   amarra a la venta (`sale_id`) bajo `for update`.
+9. **Sin internet no hay PIN que validar:** se cobra igual y la venta queda
+   `manual_sin_autorizar`, en rojo en *Reportes → Control de pesos*.
+10. **El servidor no ve la báscula**, ve lo que dice el navegador. Lo que
+    impide fabricar lecturas desde la consola es el **modo kiosko**
+    (`caja/politicas-kiosko.reg`: sin DevTools, sin extensiones, solo la caja
+    y Supabase). Engañar a la báscula por fuera (ZERO con el vaso encima, la
+    mano en el plato) solo lo destapa el cuadre de inventario. Decirlo así.
+11. **La CAS PD-II va en tYPE-5 (NCI General), 9600 7E1.** La caja manda `W\r`
+    y la báscula contesta `<LF>peso UU<CR><LF>hh<CR><ETX>`. Si se cambia de
+    modelo, se ajusta `config.js` (SCALE_*); `bascula.js` entiende también
+    básculas de salida continua.
+
 ## 4. Restricciones permanentes (pedidas explícitamente)
 
 - **NUNCA incluir el sitio web `https://tutis.innova504.com/` en la factura o
@@ -352,9 +406,9 @@ Vive en `cierre-diario/`, un Worker de Cloudflare con disparador de reloj.
 - En las tablas, guardar y eliminar van con **iconos** (disquete y papelera),
   no con texto.
 - La pantalla de venta debe mostrar **peso de helado, peso de toppings, peso de
-  recipiente (vaso) y peso total**. El peso de toppings se calcula como
-  `peso total − peso de helado − tara` cuando se usa la báscula para el total,
-  y ahí se avisa si no cuadra con lo registrado topping por topping.
+  recipiente (vaso) y peso total**, y de dónde salió el peso (báscula o a
+  mano). Con la báscula, el total es la última lectura y cuadra por
+  construcción con helado + toppings + tara (ver 3.4).
 - Se maneja **gramos y onzas** en todos los campos de peso (`OZ_TO_G = 28.349523125`).
 
 ## 5. Estado de la facturación
@@ -389,9 +443,14 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/05_endurecimiento.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/06_ventas_por_hora.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/07_cierre_automatico.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/08_fidelizacion.sql
+# 09 usa pg_net, que solo existe en Supabase: crear antes un net.http_post
+# de mentira (ver prueba_wallet_avisos.sql) y quitar su "create extension".
+grep -v "create extension if not exists pg_net" sql/09_wallet_avisos.sql | psql -h /tmp/pg -p 5433 -U postgres
+psql -h /tmp/pg -p 5433 -U postgres -f sql/10_peso_fijo.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_aislamiento.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_seguridad.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_fidelizacion.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_pesos.sql
 ```
 
 `00_simulacion_supabase.sql` recrea lo que Supabase ya trae (schema `auth`,
@@ -406,11 +465,10 @@ otra sucursal aun conociendo su UUID.
 
 ### Frontend (sin servidor real)
 
-Hay pruebas con Playwright que interceptan `config.js` y el SDK de Supabase con
-un doble en memoria, y manejan la app de punta a punta: entrada por rol, cálculo
-del ticket, cobro con internet, cobro sin internet (verificando la cola local),
-y el tema. Se levantan con `node` + `playwright` apuntando a
-`file://.../web/index.html`. Lo esencial que deben seguir cumpliendo:
+`pruebas-web/` tiene pruebas con Playwright que cambian el SDK de Supabase por
+un doble en memoria y simulan la báscula CAS por Web Serial. Manejan la caja de
+punta a punta: pesar, línea fija, anular, recargar, PIN, sin internet, reporte
+(cómo correrlas: su LEEME.md). Lo esencial que debe seguir cumpliéndose:
 
 - Una cajera ve solo la pestaña Venta; el propietario ve las 6.
 - 150g helado + 30g topping + vaso de 15g a 0.45/g = **HNL 87.75**.
@@ -420,11 +478,14 @@ y el tema. Se levantan con `node` + `playwright` apuntando a
 
 ## 7. Pendientes, en orden de valor
 
-1. **Afinar el lector de báscula** al modelo que compren. Todavía no la tienen.
-   Se les recomendó Torrey/CAS/OHAUS con salida serial continua ("PC mode").
-   El lector actual (`web/app.js`, sección 14, Web Serial) es tolerante: toma el
-   primer número de cada línea. Requiere Chrome/Edge + HTTPS; no funciona en
-   Safari ni iPad.
+1. **Probar la báscula real.** Ya tienen una CAS PD-II; el lector
+   (`web/bascula.js`) está hecho para su protocolo NCI y probado con una
+   báscula simulada, no con la física. Falta: cable + adaptador USB-serial,
+   ponerla en tYPE-5 y una pesada real. Requiere Chrome/Edge + HTTPS; no
+   funciona en Safari ni iPad.
+2. **Catálogo real**: venden por onza (yogurt ~L 11.80 con ISV), toppings
+   premium a tarifa fija y Bubble Pop por onza; el modelo de precio único por
+   gramo no es el suyo. Pendiente de la lista de precios vigente.
 3. **Conectar el proveedor de facturación** cuando exista el registro fiscal.
 4. **Respaldos**: el plan gratuito tiene retención limitada. Si el negocio
    crece, conviene subir de plan o exportar ventas periódicamente.

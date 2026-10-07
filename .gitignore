@@ -22,3 +22,6 @@ wallet/secretos/
 *.p8
 *.cer
 wallet-service-account*.json
+
+# Capturas que dejan las pruebas de la caja
+pruebas-web/*.png

@@ -1,0 +1,11 @@
+Windows Registry Editor Version 5.00
+
+; ============================================================================
+;  TUTI'S - Quitar las politicas de Chrome de la caja (solo soporte tecnico)
+;
+;  Borra TODAS las politicas de Chrome de esta computadora, no solo las de
+;  Tuti's. Aplicar con doble clic desde una cuenta de administrador y
+;  reiniciar Chrome.
+; ============================================================================
+
+[-HKEY_LOCAL_MACHINE\SOFTWARE\Policies\Google\Chrome]
