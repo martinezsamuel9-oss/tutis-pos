@@ -432,3 +432,8 @@ table.data tr.low-stock td { background: var(--danger-bg); }
 #table-clientes tbody tr.sel td { background: var(--accent-soft); }
 .pts-gana  { color: var(--success); font-weight: 700; }
 .pts-canje { color: var(--danger);  font-weight: 700; }
+
+/* --- Separador "o" (entrar con huella / autorizar con PIN) ----------------- */
+.or-sep { display: flex; align-items: center; gap: 10px; margin: 14px 0; color: var(--ink-soft); font-size: 0.78rem; }
+.or-sep::before, .or-sep::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+#table-huellas .tl-meta { display: block; font-weight: 400; color: var(--ink-soft); font-size: 0.74rem; margin-top: 2px; }

@@ -11,7 +11,7 @@ la tara sale del catálogo, no toma el peso mientras el plato se mueve, la líne
 pesada queda fija, 150 g + 30 g + vaso de 15 g a 0.45/g = 87.75, la venta
 lleva la lectura cruda, anular y recargar quedan registrados, pesos a mano con
 PIN (bueno y malo), sin internet, el PIN de la gerente y el reporte de control
-de pesos.
+de pesos, y entrar y autorizar con la huella del teléfono.
 
 Cómo correrlas:
 

@@ -64,11 +64,13 @@ sql/08_fidelizacion.sql     clientes, puntos, canje y carnet público
 sql/09_wallet_avisos.sql    avisos a Wallet cuando cambia un saldo (pg_net)
 sql/10_peso_fijo.sql        el peso lo pone la báscula: PIN de gerente, autorizaciones,
                             clasificación de cada venta y pedidos anulados
+sql/11_huella.sql           autorizar con la huella del teléfono de la gerente (passkeys)
 cierre-diario/      Worker programado que manda el cierre (ver su LEEME.md)
 wallet/             Worker de pases de Apple/Google Wallet en wallet.slabblu.com (ver su LEEME.md)
 wallet/secretos/    llave y certificado de Apple — GITIGNORADO, nunca al repo
 sql/pruebas/        prueba_aislamiento.sql (13) + prueba_seguridad.sql (48 ataques)
                     + prueba_fidelizacion.sql (19) + prueba_pesos.sql (48)
+                    + prueba_huella.sql (12)
                     + datos_de_demostracion.sql (14 días de ventas, borrables)
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
 web/app.js          toda la lógica (17 secciones numeradas)
@@ -378,6 +380,31 @@ pesado no se cambia. Lo que no hay que deshacer:
     modelo, se ajusta `config.js` (SCALE_*); `bascula.js` entiende también
     básculas de salida continua.
 
+## 3.5 Huella del teléfono (passkeys)
+
+Pedido del dueño (2026-10-07): entrar y autorizar con biométrico. Eligió
+**el teléfono de cada quien** (no llaves USB ni lector en la caja) y dejar el
+PIN como respaldo. Usa Passkeys de Supabase Auth (beta, mayo 2026); el SDK
+2.116 de `web/vendor/` ya lo trae con `auth: { experimental: { passkey: true } }`.
+Se enciende con `PASSKEYS: true` en `config.js`. Lo que no hay que deshacer:
+
+1. **Nada de lector de huella en la caja.** Windows Hello no sabe QUIÉN puso
+   el dedo, solo que es uno de los registrados en esa cuenta de Windows: la
+   cajera elegiría la cuenta de la gerente y pondría su dedo. Por eso
+   tampoco se ofrece registrar huella desde una computadora (`esTelefono()`),
+   solo desde un teléfono.
+2. **Autorizar abre una sesión APARTE** (`sbAutoriza()`, `persistSession:
+   false`), la de la gerente, que se cierra con `signOut({scope:"local"})`
+   enseguida. La de la cajera no se toca.
+3. **`autorizar_peso_presencial` exige `amr` = passkey de hace menos de 5
+   min.** Una sesión de la gerente abierta con contraseña, o vieja, no sirve.
+   Quien llama es la gerente; la cajera viene como parámetro y se valida que
+   sea de la tienda.
+4. **`weight_authorizations.method`** dice 'pin' o 'huella', y el reporte lo
+   muestra.
+5. Necesita internet y Bluetooth en la computadora de la caja (el teléfono
+   se enlaza por QR + Bluetooth). Sin eso queda el PIN.
+
 ## 4. Restricciones permanentes (pedidas explícitamente)
 
 - **NUNCA incluir el sitio web `https://tutis.innova504.com/` en la factura o
@@ -447,10 +474,12 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/08_fidelizacion.sql
 # de mentira (ver prueba_wallet_avisos.sql) y quitar su "create extension".
 grep -v "create extension if not exists pg_net" sql/09_wallet_avisos.sql | psql -h /tmp/pg -p 5433 -U postgres
 psql -h /tmp/pg -p 5433 -U postgres -f sql/10_peso_fijo.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/11_huella.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_aislamiento.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_seguridad.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_fidelizacion.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_pesos.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_huella.sql
 ```
 
 `00_simulacion_supabase.sql` recrea lo que Supabase ya trae (schema `auth`,

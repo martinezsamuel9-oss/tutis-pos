@@ -32,6 +32,10 @@ window.TUTIS_CONFIG = {
   SCALE_PARITY: "even",
   SCALE_STOP_BITS: 1,
 
+  // Entrar y autorizar con la huella del teléfono. Encenderlo SOLO después de
+  // activar Passkeys en Supabase (Authentication → Passkeys).
+  PASSKEYS: false,
+
   // Servicio de pases de Apple Wallet y Google Wallet. Cada uno se enciende
   // aparte, cuando su certificado o su cuenta estén configurados.
   WALLET_URL: "https://wallet.slabblu.com",

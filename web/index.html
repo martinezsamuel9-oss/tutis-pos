@@ -28,6 +28,10 @@
       <input type="password" id="login-password" autocomplete="current-password" required>
     </div>
     <button class="btn primary block big" type="submit" id="login-btn">Entrar</button>
+    <div id="login-passkey-area" hidden>
+      <div class="or-sep"><span>o</span></div>
+      <button class="btn ghost block big" type="button" id="btn-login-passkey">Entrar con la huella de mi teléfono</button>
+    </div>
     <p class="alert bad" id="login-error" hidden></p>
     <p class="hint" style="margin-top:14px;" id="login-config-warning" hidden>
       El sistema todavía no está conectado al servidor. Avísale a soporte técnico.
@@ -46,6 +50,7 @@
       <div class="top-right">
         <div class="badge" id="conn-badge"><span class="dot"></span><span id="conn-text">En línea</span></div>
         <div class="badge" id="user-badge">—</div>
+        <button class="icon-round" id="btn-mi-huella" type="button" title="Mi huella" aria-label="Mi huella" hidden></button>
         <button class="icon-round" id="theme-toggle" type="button" title="Cambiar tema" aria-label="Cambiar entre modo día y modo noche"></button>
         <button class="btn ghost" id="btn-logout" type="button">Salir</button>
       </div>
@@ -747,9 +752,6 @@
     <h2>Autorización de la gerente</h2>
     <p class="sub">Estos pesos se teclearon a mano. Revísalos: lo que autorices es exactamente lo que se cobra.</p>
     <div class="ticket" id="pin-summary"></div>
-    <div class="field stack"><label for="pin-manager">Quién autoriza</label><select id="pin-manager"></select></div>
-    <div class="field stack"><label for="pin-code">PIN</label>
-      <input type="password" id="pin-code" inputmode="numeric" autocomplete="off" maxlength="8"></div>
     <div class="field stack"><label for="pin-reason">Motivo</label>
       <select id="pin-reason">
         <option>La báscula no conecta</option>
@@ -759,10 +761,45 @@
       </select>
       <input type="text" id="pin-reason-other" placeholder="Explica el motivo" maxlength="200" hidden>
     </div>
+    <div id="pin-passkey-area" hidden>
+      <button class="btn accent block" id="btn-pin-passkey" type="button">Autorizar con la huella de la gerente</button>
+      <p class="hint">La caja muestra un código: la gerente lo escanea con su teléfono y confirma con su huella.</p>
+      <div class="or-sep"><span>o con PIN</span></div>
+    </div>
+    <div class="field stack"><label for="pin-manager">Quién autoriza</label><select id="pin-manager"></select></div>
+    <div class="field stack"><label for="pin-code">PIN</label>
+      <input type="password" id="pin-code" inputmode="numeric" autocomplete="off" maxlength="8"></div>
     <p class="hint" id="pin-msg"></p>
     <div class="modal-actions">
       <button class="btn ghost" id="btn-pin-cancel" type="button">Cancelar</button>
-      <button class="btn primary" id="btn-pin-ok" type="button">Autorizar y cobrar</button>
+      <button class="btn primary" id="btn-pin-ok" type="button">Autorizar con PIN</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= MI HUELLA ======================= -->
+<div class="modal-overlay" id="huella-modal" hidden>
+  <div class="modal-box">
+    <h2>Mi huella</h2>
+    <p class="sub">
+      Con la huella (o la cara) de tu teléfono entras a la caja sin contraseña y, si eres gerente,
+      autorizas pesos a mano. La huella nunca sale de tu teléfono: el sistema solo guarda una llave pública.
+    </p>
+    <div id="huella-registrar-area">
+      <button class="btn primary block" id="btn-huella-registrar" type="button">Registrar este teléfono</button>
+    </div>
+    <p class="hint" id="huella-solo-telefono" hidden>
+      Para registrar tu huella, entra a <strong>tutis.slabblu.com</strong> desde <strong>tu teléfono</strong>,
+      con tu correo y contraseña, y toca <strong>Mi huella</strong>. En la computadora de la caja no se registra:
+      ahí la usarías con el dedo de cualquiera.
+    </p>
+    <p class="hint" id="huella-msg"></p>
+    <div class="sub" style="margin-top:12px;">Teléfonos registrados con tu usuario. Si ves uno que no es tuyo, bórralo y avísale al propietario.</div>
+    <div class="table-wrap"><table class="data" id="table-huellas">
+      <thead><tr><th>Dispositivo</th><th></th></tr></thead><tbody></tbody>
+    </table></div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btn-huella-cerrar" type="button">Cerrar</button>
     </div>
   </div>
 </div>

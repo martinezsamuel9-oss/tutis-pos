@@ -44,30 +44,52 @@
           ? { data: { ok: true, id: "AUTH-1", authorized_by_name: "Gerente Galerías" }, error: null }
           : { data: { ok: false, error: "PIN incorrecto." }, error: null };
       case "registrar_anulacion": return { data: { ok: true }, error: null };
+      case "autorizar_peso_presencial":
+        return this && this.__gerente
+          ? { data: { ok: true, id: "AUTH-H", authorized_by_name: "Gerente Galerías" }, error: null }
+          : { data: null, error: { message: "Para autorizar con huella hay que confirmarla en el teléfono en ese momento", code: "P0001" } };
       case "tengo_pin": return { data: false, error: null };
       case "set_manager_pin": return args.p_pin === "1234" ? { data: null, error: { message: "Ese PIN es demasiado fácil de adivinar. Elige otro." } } : { data: null, error: null };
       case "control_pesos": return { data: {
         por_cajera: [{ cajera: "Cajera Uno", ventas_pesadas: 10, bascula: 8, no_cuadra: 0, manual_autorizado: 1, manual_sin_autorizar: 1, sin_dato: 0, anulaciones: 2, gramos_anulados: 340 }],
         incidentes: [
           { tipo: "venta", fecha: "2026-10-07T18:00:00Z", folio: 12, cajera: "Cajera Uno", clase: "manual_sin_autorizar", peso_g: 180, autorizo: null, motivo: null },
-          { tipo: "venta", fecha: "2026-10-07T17:00:00Z", folio: 11, cajera: "Cajera Uno", clase: "manual_autorizado", peso_g: 200, autorizo: "Gerente <b>Galerías</b>", motivo: "La báscula no conecta" },
+          { tipo: "venta", fecha: "2026-10-07T17:00:00Z", folio: 11, cajera: "Cajera Uno", clase: "manual_autorizado", peso_g: 200, autorizo: "Gerente <b>Galerías</b>", metodo: "pin", motivo: "La báscula no conecta" },
+          { tipo: "venta", fecha: "2026-10-07T16:00:00Z", folio: 10, cajera: "Cajera Uno", clase: "manual_autorizado", peso_g: 150, autorizo: "Gerente Galerías", metodo: "huella", motivo: "La báscula no conecta" },
         ] }, error: null };
       default: return { data: null, error: { message: "no simulado: " + name, code: "X" } };
     }
   }
 
+  let clientes = 0;
   window.supabase = {
-    createClient() {
-      return {
+    createClient(url, key, opts) {
+      const n = ++clientes;          // el 1 es el de la caja; los demás, sesiones aparte
+      const c = {
+        __n: n, __gerente: false,
         auth: {
-          getSession: async () => ({ data: { session: { user: { id: "U1" } } } }),
+          getSession: async () => ({ data: { session: (n === 1 && localStorage.getItem("fake_logged_out") !== "1") ? { user: { id: "U1" } } : null } }),
           onAuthStateChange() { return { data: { subscription: { unsubscribe() {} } } }; },
-          signOut: async () => ({}),
+          signOut: async (o) => { anotar("signOut", { cliente: n, scope: o && o.scope }); return {}; },
+          signInWithPassword: async () => { localStorage.removeItem("fake_logged_out"); return { error: null }; },
+          signInWithPasskey: async () => {
+            anotar("signInWithPasskey", { cliente: n, experimental: opts && opts.auth && opts.auth.experimental });
+            if (n === 1) { localStorage.removeItem("fake_logged_out"); return { data: { session: { user: { id: "U1" } } }, error: null }; }
+            c.__gerente = true;
+            return { data: { session: { user: { id: "G1" } } }, error: null };
+          },
+          registerPasskey: async () => { anotar("registerPasskey", {}); return { data: {}, error: null }; },
+          passkey: {
+            list: async () => ({ data: [{ id: "PK1", friendly_name: "iPhone de <i>Ana</i>", created_at: "2026-10-01T10:00:00Z", last_used_at: null }], error: null }),
+            delete: async (a) => { anotar("deletePasskey", a); return { error: null }; },
+          },
         },
-        from: query, rpc,
+        from: query,
+        rpc: (name, args) => rpc.call(c, name, args),
         channel() { return { on() { return this; }, subscribe() { return this; } }; },
         removeChannel() {},
       };
+      return c;
     },
   };
 })();

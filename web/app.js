@@ -74,6 +74,8 @@ function money(v) {
 
 const ICON_SAVE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/></svg>';
 const ICON_TRASH = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>';
+// Huella digital (trazo propio, mismo estilo que los demás iconos).
+const ICON_FINGER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M2 16h.01"/><path d="M21.8 16c.2-2 .131-5.354 0-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M8.65 22c.21-.66.45-1.32.57-2"/><path d="M9 6.8a6 6 0 0 1 9 5.2v2"/></svg>';
 const ICON_MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>';
 const ICON_SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>';
 
@@ -117,10 +119,14 @@ if (window.matchMedia) {
 const CONFIGURED = CFG.SUPABASE_URL && !CFG.SUPABASE_URL.includes("TU-PROYECTO")
                 && CFG.SUPABASE_ANON_KEY && !CFG.SUPABASE_ANON_KEY.includes("TU-LLAVE");
 
+// Entrar y autorizar con la huella del teléfono (passkeys de Supabase Auth).
+// Se enciende en config.js cuando Passkeys está activado en el proyecto.
+const HUELLA = !!CFG.PASSKEYS && typeof window.PublicKeyCredential !== "undefined";
+
 let sb = null;
 if (CONFIGURED) {
   sb = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, {
-    auth: { persistSession: true, autoRefreshToken: true },
+    auth: { persistSession: true, autoRefreshToken: true, experimental: { passkey: HUELLA } },
   });
 } else {
   $("login-config-warning").hidden = false;
@@ -334,6 +340,83 @@ $("login-form").addEventListener("submit", async (e) => {
   } finally {
     btn.disabled = false; btn.textContent = "Entrar";
   }
+});
+
+/* --- Huella del teléfono (passkeys) ----------------------------------------
+   Por qué el teléfono de cada quien y no un lector en la caja: un lector de
+   Windows no sabe QUIÉN puso el dedo, solo que es uno de los registrados en
+   esa computadora. En una caja compartida, la cajera elegiría la cuenta de
+   la gerente y pondría su propio dedo. El teléfono es de una sola persona.
+   Por eso tampoco se registra la huella desde la computadora de la caja. */
+function textoErrorHuella(e) {
+  const m = (e && (e.message || e.name)) || "";
+  if (/NotAllowed|cancel|abort|timed? ?out/i.test(m)) return "Se canceló o se acabó el tiempo. Inténtalo otra vez.";
+  if (/not support/i.test(m)) return "Este navegador no puede usar huella. Usa Chrome.";
+  return m || "No se pudo.";
+}
+function esTelefono() {
+  return !!(navigator.userAgentData && navigator.userAgentData.mobile)
+    || /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    || (navigator.maxTouchPoints > 1 && /Macintosh/.test(navigator.userAgent));
+}
+
+if (HUELLA) $("login-passkey-area").hidden = false;
+$("btn-login-passkey").addEventListener("click", async () => {
+  if (!sb) return;
+  const btn = $("btn-login-passkey"), err = $("login-error");
+  err.hidden = true; btn.disabled = true;
+  try {
+    const { error } = await sb.auth.signInWithPasskey();
+    if (error) throw error;
+    await startSession();
+  } catch (ex) {
+    err.textContent = `No se pudo entrar con huella: ${textoErrorHuella(ex)}`;
+    err.hidden = false;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+async function pintarHuellas() {
+  const tb = document.querySelector("#table-huellas tbody");
+  tb.innerHTML = '<tr><td colspan="2" class="hint">Cargando…</td></tr>';
+  const { data, error } = await sb.auth.passkey.list();
+  if (error) { tb.innerHTML = `<tr><td colspan="2" class="hint">${esc(textoErrorHuella(error))}</td></tr>`; return; }
+  const lista = Array.isArray(data) ? data : (data && (data.passkeys || data.items)) || [];
+  tb.innerHTML = lista.length ? "" : '<tr><td colspan="2" class="hint">Todavía no tienes ningún teléfono registrado.</td></tr>';
+  const f = (d) => (d ? new Date(d).toLocaleDateString() : "—");
+  lista.forEach((p) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${esc(p.friendly_name || p.name || "Teléfono")}
+        <span class="tl-meta">registrado ${esc(f(p.created_at))} · último uso ${esc(f(p.last_used_at))}</span></td>
+      <td style="width:44px;"><button class="icon-btn delete" type="button" title="Borrar" aria-label="Borrar">${ICON_TRASH}</button></td>`;
+    tr.querySelector("button").addEventListener("click", async () => {
+      if (!confirm("¿Borrar este teléfono? Ya no podrá entrar ni autorizar con huella.")) return;
+      const { error: e2 } = await sb.auth.passkey.delete({ passkeyId: p.id });
+      $("huella-msg").textContent = e2 ? textoErrorHuella(e2) : "Borrado.";
+      pintarHuellas();
+    });
+    tb.appendChild(tr);
+  });
+}
+
+if (HUELLA) { $("btn-mi-huella").hidden = false; $("btn-mi-huella").innerHTML = ICON_FINGER; }
+$("btn-mi-huella").addEventListener("click", () => {
+  const tel = esTelefono();
+  $("huella-registrar-area").hidden = !tel;
+  $("huella-solo-telefono").hidden = tel;
+  $("huella-msg").textContent = "";
+  $("huella-modal").hidden = false;
+  pintarHuellas();
+});
+$("btn-huella-cerrar").addEventListener("click", () => { $("huella-modal").hidden = true; });
+$("btn-huella-registrar").addEventListener("click", async () => {
+  const btn = $("btn-huella-registrar"); btn.disabled = true;
+  $("huella-msg").textContent = "Confirma con tu huella o tu cara…";
+  const { error } = await sb.auth.registerPasskey();
+  btn.disabled = false;
+  $("huella-msg").textContent = error ? `No se pudo registrar: ${textoErrorHuella(error)}` : "Listo: ya puedes entrar con tu huella.";
+  pintarHuellas();
 });
 
 $("btn-logout").addEventListener("click", async () => {
@@ -919,6 +1002,8 @@ function pedirAutorizacion(plan, pesadoG) {
     $("pin-reason").value = $("pin-reason").options[0].value;
     $("pin-reason-other").hidden = true;
     $("btn-pin-ok").disabled = true;
+    $("pin-passkey-area").hidden = !HUELLA;
+    $("btn-pin-passkey").disabled = false;
     $("pin-modal").hidden = false;
 
     const { data, error } = await sb.rpc("gerentes_para_autorizar", { p_location_id: STATE.activeLocationId });
@@ -931,7 +1016,9 @@ function pedirAutorizacion(plan, pesadoG) {
     if (error) {
       $("pin-msg").textContent = "No se pudo consultar quién autoriza. Revisa la conexión.";
     } else if (!(data || []).length) {
-      $("pin-msg").textContent = "Ninguna gerente de esta tienda tiene PIN todavía. Se crea en Configuración → Mi PIN de autorización.";
+      $("pin-msg").textContent = HUELLA
+        ? "Nadie de esta tienda tiene PIN todavía: autoriza con la huella."
+        : "Ninguna gerente de esta tienda tiene PIN todavía. Se crea en Configuración → Mi PIN de autorización.";
     } else {
       $("pin-msg").textContent = "";
       $("btn-pin-ok").disabled = false;
@@ -952,9 +1039,50 @@ $("pin-reason").addEventListener("change", () => {
 });
 $("btn-pin-cancel").addEventListener("click", () => cerrarPin(null));
 $("pin-code").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); $("btn-pin-ok").click(); } });
+function motivoAutorizacion() {
+  return $("pin-reason").value === "otro" ? $("pin-reason-other").value.trim() : $("pin-reason").value;
+}
+
+/* Con huella: se abre una sesión APARTE para la gerente, en memoria y solo
+   para esta autorización. La de la cajera no se toca, y la de la gerente se
+   cierra enseguida. La base exige que esa sesión venga de una passkey usada
+   hace menos de 5 minutos (ver sql/11_huella.sql). */
+let clienteAutoriza = null;
+function sbAutoriza() {
+  if (!clienteAutoriza) {
+    clienteAutoriza = window.supabase.createClient(CFG.SUPABASE_URL, CFG.SUPABASE_ANON_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false,
+              storageKey: "tutis-autoriza", experimental: { passkey: true } },
+    });
+  }
+  return clienteAutoriza;
+}
+$("btn-pin-passkey").addEventListener("click", async () => {
+  const motivo = motivoAutorizacion();
+  if (motivo.length < 3) { $("pin-msg").textContent = "Escribe el motivo."; return; }
+  const btn = $("btn-pin-passkey"); btn.disabled = true;
+  $("pin-msg").textContent = "Que la gerente escanee el código con su teléfono y confirme con su huella…";
+  const cli = sbAutoriza();
+  try {
+    const { data: ses, error: e1 } = await cli.auth.signInWithPasskey();
+    if (e1 || !ses || !ses.session) throw e1 || new Error("No se pudo verificar la huella.");
+    const { data, error } = await cli.rpc("autorizar_peso_presencial", {
+      p_location_id: STATE.activeLocationId, p_requested_by: STATE.profile.id,
+      p_weight_g: Number($("pin-modal").dataset.peso), p_reason: motivo,
+    });
+    if (error) throw error;
+    cerrarPin({ id: data.id, nombre: data.authorized_by_name });
+  } catch (e) {
+    $("pin-msg").textContent = textoErrorHuella(e);
+  } finally {
+    try { await cli.auth.signOut({ scope: "local" }); } catch (e) {}
+    btn.disabled = false;
+  }
+});
+
 $("btn-pin-ok").addEventListener("click", async () => {
   const pin = $("pin-code").value.trim();
-  const motivo = $("pin-reason").value === "otro" ? $("pin-reason-other").value.trim() : $("pin-reason").value;
+  const motivo = motivoAutorizacion();
   if (!/^\d{4,8}$/.test(pin)) { $("pin-msg").textContent = "El PIN son de 4 a 8 números."; return; }
   if (motivo.length < 3) { $("pin-msg").textContent = "Escribe el motivo."; return; }
   const btn = $("btn-pin-ok"); btn.disabled = true;
@@ -1970,7 +2098,7 @@ async function cargarControlPesos() {
       <td>${esc(i.cajera)}</td>
       <td>${esc(CLASE_PESO[i.clase] || i.clase)}</td>
       <td class="num">${esc(fmtWeightShort(Number(i.peso_g) || 0))}</td>
-      <td>${esc(i.autorizo || "—")}</td>
+      <td>${esc(i.autorizo ? `${i.autorizo}${i.metodo === "huella" ? " (huella)" : i.metodo === "pin" ? " (PIN)" : ""}` : "—")}</td>
       <td>${esc(i.motivo || "")}</td>`;
     ti.appendChild(tr);
   });

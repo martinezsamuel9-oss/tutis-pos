@@ -17,9 +17,15 @@ function ok(cond, msg, extra) {
 
 const browser = await chromium.launch();
 
-async function abrir(rol, { serial = true } = {}) {
-  const ctx = await browser.newContext({ serviceWorkers: "block" });
+const configReal = fs.readFileSync(path.join(AQUI, "..", "web", "config.js"), "utf8");
+
+async function abrir(rol, { serial = true, huella = false, fuera = false, movil = false } = {}) {
+  const ctx = await browser.newContext({ serviceWorkers: "block",
+    ...(movil ? { isMobile: true, hasTouch: true, viewport: { width: 390, height: 844 },
+                  userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1" } : {}) });
   await ctx.addInitScript((r) => { if (!localStorage.getItem("fake_role")) localStorage.setItem("fake_role", r); }, rol);
+  if (fuera) await ctx.addInitScript(() => { if (!sessionStorage.getItem("ya")) { localStorage.setItem("fake_logged_out", "1"); sessionStorage.setItem("ya", "1"); } });
+  if (huella) await ctx.route("**/config.js", (r) => r.fulfill({ contentType: "application/javascript", body: configReal.replace("PASSKEYS: false", "PASSKEYS: true") }));
   if (serial) await ctx.addInitScript(fakeSerial);
   await ctx.route("**/vendor/supabase.min.js", (r) => r.fulfill({ contentType: "application/javascript", body: fakeSb }));
   const page = await ctx.newPage();
@@ -27,7 +33,7 @@ async function abrir(rol, { serial = true } = {}) {
   page.on("pageerror", (e) => errores.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") errores.push(m.text()); });
   await page.goto(BASE + "index.html");
-  await page.waitForSelector("#app:not([hidden])");
+  await page.waitForSelector(fuera ? "#login-screen:not([hidden])" : "#app:not([hidden])");
   return { ctx, page, errores };
 }
 const rpcs = (page, name) => page.evaluate((n) => JSON.parse(localStorage.getItem("fake_rpcs") || "[]").filter((x) => x.name === n), name);
@@ -197,6 +203,71 @@ const texto = (page, sel) => page.locator(sel).innerText();
   ok((await texto(page, "#scale-status")).length > 0, "18 sin Web Serial la caja abre y lo dice", await texto(page, "#scale-status"));
   ok(errores.length === 0, "18b sin errores", errores);
   await ctx.close();
+}
+
+/* ---------------- Huella del teléfono ---------------- */
+{
+  // Sin la bandera en config.js, no aparece nada de huella.
+  const a = await abrir("cajera", { fuera: true });
+  ok(await a.page.locator("#btn-login-passkey").isHidden(), "19 con PASSKEYS apagado no aparece 'entrar con huella'");
+  await a.ctx.close();
+
+  const { ctx, page, errores } = await abrir("cajera", { huella: true, fuera: true });
+  ok(await page.locator("#btn-login-passkey").isVisible(), "20 con PASSKEYS encendido aparece 'entrar con huella'");
+  await page.click("#btn-login-passkey");
+  await page.waitForSelector("#app:not([hidden])");
+  const login = (await rpcs(page, "signInWithPasskey")).pop();
+  ok(login && login.args.cliente === 1 && login.args.experimental && login.args.experimental.passkey === true,
+     "20b entra con passkey en el cliente principal, con la opción experimental encendida", login && login.args);
+
+  await page.click("#btn-mi-huella");
+  await page.waitForSelector("#huella-modal:not([hidden])");
+  ok(await page.locator("#btn-huella-registrar").isHidden() && await page.locator("#huella-solo-telefono").isVisible(),
+     "21 en la computadora de la caja NO se ofrece registrar huella");
+  await page.waitForSelector("#table-huellas tbody tr td button");
+  ok((await page.locator("#table-huellas").innerHTML()).includes("&lt;i&gt;Ana"), "21b el nombre del dispositivo pasa por esc()");
+  page.once("dialog", (d) => d.accept());
+  await page.click("#table-huellas tbody tr td button");
+  await page.waitForFunction(() => document.querySelector("#huella-msg").textContent.includes("Borrado"));
+  ok((await rpcs(page, "deletePasskey")).pop().args.passkeyId === "PK1", "21c se puede borrar un teléfono registrado");
+  await page.click("#btn-huella-cerrar");
+
+  // Peso a mano autorizado con la huella de la gerente.
+  page.once("dialog", (d) => d.accept());
+  await page.click("#btn-manual-mode");
+  await page.fill("#inp-ice-weight", "150");
+  await page.click("#topping-chips .chip");
+  await page.fill("#order-rows .order-row input", "30");
+  await page.click("#btn-charge");
+  await page.waitForSelector("#pin-modal:not([hidden])");
+  ok(await page.locator("#btn-pin-passkey").isVisible(), "22 la ventana de autorización ofrece la huella");
+  await page.click("#btn-pin-passkey");
+  await page.waitForSelector("#receipt-modal:not([hidden])");
+  const aut = (await rpcs(page, "autorizar_peso_presencial")).pop();
+  ok(aut && aut.args.p_requested_by === "U1" && aut.args.p_weight_g === 180, "22b autoriza 180 g a nombre de la cajera que cobra", aut && aut.args);
+  const ses = (await rpcs(page, "signInWithPasskey")).pop();
+  ok(ses.args.cliente > 1, "22c la huella de la gerente abre una sesión APARTE, no la de la cajera", ses.args);
+  const salida = (await rpcs(page, "signOut")).pop();
+  ok(salida && salida.args.cliente === ses.args.cliente && salida.args.scope === "local", "22d y esa sesión se cierra enseguida", salida && salida.args);
+  const v = (await rpcs(page, "process_sale")).pop().args.payload;
+  ok(v.weight_mode === "manual" && v.weight_auth_id === "AUTH-H", "22e la venta lleva la autorización por huella");
+  ok(errores.length === 0, "23 sin errores de JavaScript (huella)", errores);
+  await ctx.close();
+
+  const m = await abrir("cajera", { huella: true, movil: true });
+  await m.page.click("#btn-mi-huella");
+  ok(await m.page.locator("#btn-huella-registrar").isVisible(), "24 desde el teléfono sí se ofrece registrar");
+  await m.page.click("#btn-huella-registrar");
+  await m.page.waitForFunction(() => document.querySelector("#huella-msg").textContent.includes("Listo"));
+  ok((await rpcs(m.page, "registerPasskey")).length === 1, "24b registra la passkey");
+  await m.page.screenshot({ path: path.join(AQUI, "huella_movil.png") });
+  await m.ctx.close();
+
+  const g = await abrir("gerente", { huella: true });
+  await g.page.click('.tab-btn[data-tab="reportes"]');
+  await g.page.waitForSelector("#table-wc-incidents tbody tr td");
+  ok((await texto(g.page, "#table-wc-incidents")).includes("(huella)"), "25 el reporte dice si se autorizó con huella o con PIN");
+  await g.ctx.close();
 }
 
 await browser.close();
