@@ -452,8 +452,27 @@ fiscales ni simular validez fiscal: el dueño aceptó explícitamente este enfoq
 
 ### 5.1 Lo que se sabe del sistema actual (dicho por el negocio, 2026-10-07)
 
-- El sistema que usan hoy se llama **CG Manager**.
-- **Un punto de venta por tienda.** Cada tienda es un punto de emisión.
+Cómo se cobra HOY, según la dueña del negocio (las reglas de operación y
+precios las define ella; Samuel lleva el sistema):
+
+- **La taza se cobra por onza del peso total**: taza + todos los sabores +
+  todos los toppings normales, en una sola pesada. Es el "precio único por
+  peso total" del requisito 7. En su sistema: "Oz Frozen Yogurt Mix",
+  L 10.26 sin ISV (≈ L 11.80 con ISV) la onza.
+- **El topping premium NUNCA va en la taza**: va aparte, en su porción. Se
+  calcula a L 60 la onza, pero se vende por porción a L 60 (L 52.17 sin ISV),
+  sin pesar.
+- **Toppings para llevar aparte**: el normal tiene otro precio, el premium
+  también.
+- **Bubble Pop** se pesa aparte y se cobra por onza (L 43.48 sin ISV = L 50).
+- Los precios de su sistema están SIN ISV; la factura suma el 15 %.
+
+- El sistema que usan hoy es de ICG: **FrontRetail** en cada caja (las
+  terminales) y **Manager** como administración central de las dos.
+- **Una sola caja por tienda.** Cada tienda es un punto de emisión.
+- El contador solo pide a la SAR el rango nuevo (CAI); el sistema imprime
+  el correlativo que la SAR asignó. (Pendiente de que el contador confirme
+  si cambiar de software exige avisar a la SAR como autoimpresor.)
 - **Multiplaza tiene su propio CAI** y su propia fecha límite de emisión
   (Galerías: CAI 452640-F3E73E-43FBE0-63BE03-090938-BF, rango
   000-001-01-00622001 a 00702000, vence 04/12/2026). Cuando se encienda la
