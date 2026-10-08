@@ -450,6 +450,23 @@ del país de esa sucursal, marcado claramente como **no fiscal**. Está diseñad
 para conectar el proveedor real sin rehacer el sistema. No inventar folios
 fiscales ni simular validez fiscal: el dueño aceptó explícitamente este enfoque.
 
+### 5.1 Lo que se sabe del sistema actual (dicho por el negocio, 2026-10-07)
+
+- El sistema que usan hoy se llama **CG Manager**.
+- **Un punto de venta por tienda.** Cada tienda es un punto de emisión.
+- **Multiplaza tiene su propio CAI** y su propia fecha límite de emisión
+  (Galerías: CAI 452640-F3E73E-43FBE0-63BE03-090938-BF, rango
+  000-001-01-00622001 a 00702000, vence 04/12/2026). Cuando se encienda la
+  facturación fiscal, el CAI, el rango y la fecha límite van POR SUCURSAL, y
+  hay que avisar antes de que venzan o se agoten.
+- Compras, por categoría:
+  - **CTG**: gastos.
+  - **CTH**: materia prima que entra **desde bodega** (hay una bodega
+    central que surte a las tiendas).
+  - **011C / 021C**: materia prima comprada y recibida directo por cada
+    tienda, y cada tienda la ingresa. Falta confirmar cuál código es de
+    cuál tienda (probable: 011C Galerías, 021C Multiplaza).
+
 ## 6. Cómo probar los cambios
 
 Todo lo entregado fue verificado antes de entregarse. Si tocas el esquema o las
