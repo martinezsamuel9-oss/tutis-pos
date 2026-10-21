@@ -326,6 +326,17 @@
               <option value="transferencia">Transferencia</option>
             </select>
             <div class="tiles tiles-pay" id="tiles-payment" role="radiogroup" aria-label="Forma de pago"></div>
+            <!-- Mientras el datáfono no esté integrado: la cajera teclea el monto
+                 en el datáfono y aquí anota el voucher (sql/16). -->
+            <div class="card-box" id="card-box" hidden>
+              <div class="card-amount-label">Teclea en el datáfono</div>
+              <div class="card-amount num" id="card-amount">—</div>
+              <div class="field stack"><label for="inp-card-auth">Número de autorización del voucher</label>
+                <input id="inp-card-auth" maxlength="12" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="Ej. 123456"></div>
+              <div class="field stack"><label for="inp-card-last4">Últimos 4 dígitos de la tarjeta (opcional)</label>
+                <input id="inp-card-last4" maxlength="4" inputmode="numeric" autocomplete="off" placeholder="1234"></div>
+              <p class="hint">Solo los últimos 4: el número completo de la tarjeta nunca se anota.</p>
+            </div>
 
             <details class="sale-data">
               <summary>Factura a nombre de un cliente (RTN)</summary>
@@ -665,6 +676,10 @@
           <thead><tr><th>Forma de pago</th><th>Ventas</th><th>Total</th></tr></thead><tbody></tbody>
         </table></div>
         <p class="hint" id="closing-pay-note"></p>
+        <div class="sub" style="margin-top:14px;">Vouchers de tarjeta: compáralos con el cierre de lote del datáfono. Lo que no tenga autorización o la repita se marca en rojo.</div>
+        <div class="table-wrap"><table class="data" id="table-closing-vouchers">
+          <thead><tr><th>Hora</th><th>Folio</th><th>Autorización</th><th>Tarjeta</th><th>Monto</th></tr></thead><tbody></tbody>
+        </table></div>
         <div class="sub" style="margin-top:14px;">Toppings vendidos ese día, con su % sobre el total de peso de toppings.</div>
         <div class="table-wrap"><table class="data" id="table-closing-toppings">
           <thead><tr><th>Topping</th><th>Peso vendido</th><th>% del total</th></tr></thead><tbody></tbody>

@@ -268,6 +268,12 @@ main { padding: 20px 16px 60px; }
   .product-row .pr-total { grid-column: 1 / -1; text-align: left; }
 }
 
+/* Tarjeta: el monto grande para teclearlo en el datáfono, y el voucher. */
+.card-box { margin-top: 12px; padding: 14px; border-radius: var(--radius-m); background: var(--surface-2); border: 2px solid var(--accent); }
+.card-amount-label { font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-soft); }
+.card-amount { font-size: 2rem; font-weight: 700; color: var(--ink); margin: 2px 0 10px; }
+.card-box input { min-height: 52px; font-size: 1.2rem; letter-spacing: .08em; }
+
 /* Pesar, cobrar y anular: grandes y fáciles de acertar. */
 .btn.touch-weigh { min-height: 60px; min-width: 130px; padding: 12px 20px; font-size: 1.1rem; border-radius: var(--radius-m); touch-action: manipulation; }
 .btn.touch-charge { min-height: 76px; margin-top: 16px; font-size: 1.3rem; border-radius: var(--radius-m); touch-action: manipulation; }

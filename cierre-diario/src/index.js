@@ -242,6 +242,28 @@ function envoltura(titulo, cuerpo) {
   </div></body></html>`;
 }
 
+// Los vouchers de tarjeta del día (sql/16), para cuadrar contra el cierre de
+// lote del datáfono. Repetidos o sin número, en rojo y dicho con texto.
+function tablaVouchers(c, moneda) {
+  const vs = c.vouchers || [];
+  if (!vs.length) return "";
+  const veces = {};
+  vs.forEach((v) => { if (v.autorizacion) veces[v.autorizacion] = (veces[v.autorizacion] || 0) + 1; });
+  const filas = vs.map((v) => {
+    const malo = !v.autorizacion || veces[v.autorizacion] > 1;
+    const aut = v.autorizacion ? v.autorizacion + (veces[v.autorizacion] > 1 ? " (repetida)" : "") : "SIN AUTORIZACIÓN";
+    const estilo = malo ? ' style="color:#B14328;font-weight:700"' : "";
+    return `<tr><td ${TD}>${esc(String(v.folio))}</td><td ${TD}><span${estilo}>${esc(aut)}</span></td>
+      <td ${TD}>${v.ultimos4 ? "****" + esc(v.ultimos4) : "—"}</td><td ${TDN}>${esc(dinero(moneda, v.total))}</td></tr>`;
+  }).join("");
+  return `
+  <h3 style="margin:22px 0 6px;font-size:14px;font-family:Arial,Helvetica,sans-serif">Vouchers de tarjeta</h3>
+  <table ${CSS_TABLA}>
+    <tr><th ${TH}>Folio</th><th ${TH}>Autorización</th><th ${TH}>Tarjeta</th><th ${THN}>Monto</th></tr>
+    ${filas}
+  </table>`;
+}
+
 const PAGOS = { efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia", sin_dato: "Sin dato (ventas antiguas)" };
 
 function bloqueTienda(c) {
@@ -289,7 +311,7 @@ function bloqueTienda(c) {
     <tr><th ${TH}>Forma de pago</th><th ${THN}>Ventas</th><th ${THN}>Total</th></tr>
     ${pagos}
   </table>
-  <p style="margin:6px 0 0;color:#56717A;font-size:12px;font-family:Arial,Helvetica,sans-serif">${esc(notas.join(" "))}</p>
+  <p style="margin:6px 0 0;color:#56717A;font-size:12px;font-family:Arial,Helvetica,sans-serif">${esc(notas.join(" "))}</p>${tablaVouchers(c, moneda)}
   <h3 style="margin:22px 0 6px;font-size:14px;font-family:Arial,Helvetica,sans-serif">Toppings vendidos</h3>
   <table ${CSS_TABLA}>
     <tr><th ${TH}>Topping</th><th ${THN}>Peso</th><th ${THN}>% del total</th></tr>

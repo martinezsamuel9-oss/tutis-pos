@@ -50,7 +50,12 @@
           : { data: null, error: { message: "Para autorizar con huella hay que confirmarla en el teléfono en ese momento", code: "P0001" } };
       case "tengo_pin": return { data: false, error: null };
       case "daily_closing": return { data: { ventas: 3, ingresos: 250.5, vasos: 3, cucharas: 3, peso_helado_g: 450, peso_toppings_g: 90, toppings: [],
-        por_pago: [{ metodo: "efectivo", ventas: 2, total: 170.5 }, { metodo: "tarjeta", ventas: 1, total: 80 }], descuentos: 10, anulaciones: 1, anulado_g: 185.5 }, error: null };
+        por_pago: [{ metodo: "efectivo", ventas: 2, total: 170.5 }, { metodo: "tarjeta", ventas: 1, total: 80 }], descuentos: 10, anulaciones: 1, anulado_g: 185.5,
+        vouchers: [{ folio: 7, hora: "2026-10-21T18:00:00Z", total: 80, autorizacion: "123456", ultimos4: "4321" },
+                   { folio: 9, hora: "2026-10-21T19:00:00Z", total: 50, autorizacion: "123456", ultimos4: null },
+                   { folio: 11, hora: "2026-10-21T20:00:00Z", total: 40, autorizacion: null, ultimos4: null },
+                   { folio: 12, hora: "2026-10-21T21:00:00Z", total: 30, autorizacion: "<b>X</b>", ultimos4: "9999" }],
+        tarjeta_sin_autorizacion: 1 }, error: null };
       case "set_manager_pin": return args.p_pin === "1234" ? { data: null, error: { message: "Ese PIN es demasiado fácil de adivinar. Elige otro." } } : { data: null, error: null };
       case "control_pesos": return { data: {
         por_cajera: [{ cajera: "Cajera Uno", ventas_pesadas: 10, bascula: 8, no_cuadra: 0, manual_autorizado: 1, manual_sin_autorizar: 1, sin_dato: 0, anulaciones: 2, gramos_anulados: 340 }],

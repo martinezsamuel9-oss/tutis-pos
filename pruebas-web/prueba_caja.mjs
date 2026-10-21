@@ -93,11 +93,25 @@ const texto = (page, sel) => page.locator(sel).innerText();
   const ticketCajera = await texto(page, "#tab-venta .ticket-card");
   ok(!/costo|margen/i.test(ticketCajera), "6d la cajera no ve costo ni margen en el ticket", ticketCajera.match(/.*(costo|margen).*/i));
   await page.click('#tiles-payment .tile:has-text("Tarjeta")');
+  ok(await page.locator("#card-box").isVisible() && (await texto(page, "#card-amount")).includes("87.75"),
+     "6e con tarjeta aparece el monto en grande para teclearlo en el datáfono");
+  const antes = (await rpcs(page, "process_sale")).length;
+  await page.click("#btn-charge");
+  await page.waitForTimeout(300);
+  ok((await rpcs(page, "process_sale")).length === antes, "6f sin número de autorización del voucher no se cobra");
+  await page.fill("#inp-card-auth", "ab 1234-56");
+  await page.fill("#inp-card-last4", "4a3");
+  const soloNumeros = await page.inputValue("#inp-card-last4");
+  await page.fill("#inp-card-last4", "4321");
+  ok((await page.inputValue("#inp-card-auth")) === "AB123456" && soloNumeros === "43",
+     "6g la autorización se limpia al teclear y la tarjeta solo acepta números");
   await page.click("#btn-charge");
   await page.waitForSelector("#receipt-modal:not([hidden])");
   const venta = (await rpcs(page, "process_sale")).pop();
   const p = venta && venta.args.payload;
-  ok(p && p.payment_method === "tarjeta", "6c la forma de pago se elige con un cuadro y viaja en la venta", p && p.payment_method);
+  ok(p && p.payment_method === "tarjeta" && p.card_auth_code === "AB123456" && p.card_last4 === "4321",
+     "6c la forma de pago se elige con un cuadro y viaja en la venta con su voucher", p && [p.payment_method, p.card_auth_code, p.card_last4]);
+  ok((await texto(page, "#receipt-body")).includes("Aut. AB123456 · ****4321"), "6h el recibo dice la autorización y los últimos 4");
   ok(p && p.weight_mode === "bascula" && Math.abs(p.scale_gross_g - 195) < 0.01 && p.scale_log.length === 2,
      "7 la venta lleva modo báscula, la lectura bruta (195 g) y las dos lecturas", p && { m: p.weight_mode, g: p.scale_gross_g, n: p.scale_log && p.scale_log.length });
   ok(p && p.scale_log[0].crudo.includes("KG") && p.scale_log[0].crudo.includes("<ETX>") === false,
@@ -109,6 +123,7 @@ const texto = (page, sel) => page.locator(sel).innerText();
   ok(await page.locator("#btn-weigh-ice").isVisible() && !(await page.locator("#sel-cup").isDisabled()), "7e la siguiente venta arranca limpia");
   ok((await page.inputValue("#sel-payment")) === "efectivo" && (await page.getAttribute('#tiles-payment .tile:has-text("Efectivo")', "aria-checked")) === "true",
      "7f y vuelve a Efectivo: una tarjeta de la venta anterior no se cuela en el cuadre");
+  ok(await page.locator("#card-box").isHidden() && (await page.inputValue("#inp-card-auth")) === "", "7g y el voucher anterior se borra");
 
   // TARA puesta en la báscula.
   await ponerBascula(page, { g: 150, tara: true });
@@ -305,6 +320,11 @@ const texto = (page, sel) => page.locator(sel).innerText();
   ok(pago.includes("Efectivo") && pago.includes("170.50") && pago.includes("Tarjeta") && pago.includes("250.50"),
      "27 el cierre cuadra por forma de pago, con su total", pago);
   ok((await texto(g.page, "#closing-pay-note")).includes("Pedidos anulados: 1"), "27b y dice los descuentos y los pedidos anulados");
+  const malos = await g.page.locator("#table-closing-vouchers tr.row-bad").count();
+  const vtxt = await texto(g.page, "#table-closing-vouchers");
+  ok(malos === 3 && vtxt.includes("(repetida)") && vtxt.includes("SIN AUTORIZACIÓN") && vtxt.includes("****4321"),
+     "27c la lista de vouchers marca en rojo la autorización repetida y la venta sin autorización", malos);
+  ok(!(await g.page.innerHTML("#table-closing-vouchers")).includes("<b>X</b>"), "27d lo que viene de la base se escapa");
 
   // Libro de compras
   await g.page.click('.tab-btn[data-tab="compras"]');

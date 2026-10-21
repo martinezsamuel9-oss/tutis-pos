@@ -1045,6 +1045,7 @@ function limpiarPedido() {
   // Cada venta arranca en efectivo, como en ICG: así una tarjeta de la venta
   // anterior no se cuela en el cuadre de la siguiente.
   $("sel-payment").value = "efectivo";
+  pintarTarjeta();
   try { localStorage.removeItem(LS_PEDIDO); } catch (e) {}
   pintarModo();
   renderOrderRows();
@@ -1457,7 +1458,19 @@ function renderQuote() {
 function pintarTotalCobro(monto, etiqueta) {
   $("charge-total-label").textContent = etiqueta || "Total";
   $("charge-total").textContent = monto == null ? "—" : money(monto);
+  $("card-amount").textContent = monto == null ? "—" : money(monto);
 }
+
+// Con tarjeta, la caja muestra el monto en grande para teclearlo en el
+// datáfono y pide el número de autorización del voucher al cobrar.
+function pintarTarjeta() {
+  const tarjeta = $("sel-payment").value === "tarjeta";
+  $("card-box").hidden = !tarjeta;
+  if (!tarjeta) { $("inp-card-auth").value = ""; $("inp-card-last4").value = ""; }
+}
+$("sel-payment").addEventListener("change", pintarTarjeta);
+$("inp-card-auth").addEventListener("input", (e) => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ""); });
+$("inp-card-last4").addEventListener("input", (e) => { e.target.value = e.target.value.replace(/\D/g, ""); });
 
 function pintarPreviaPuntos(p, totalLista) {
   const el = $("ticket-totals");
@@ -1509,6 +1522,22 @@ async function chargeSale(force) {
     if (!confirm(warnings.join("\n") + "\n\n¿Registrar la venta de todos modos?")) return;
   }
 
+  // Tarjeta: sin número de autorización no se cobra. Es lo que amarra la
+  // venta a su voucher; sin él, una venta en efectivo podría pasarse como
+  // tarjeta y el efectivo no cuadraría con nada.
+  let tarjeta = {};
+  if ($("sel-payment").value === "tarjeta") {
+    const aut = $("inp-card-auth").value.trim().toUpperCase();
+    const ult = $("inp-card-last4").value.trim();
+    if (!/^[A-Z0-9]{1,12}$/.test(aut)) {
+      alert(`Cobra ${$("charge-total").textContent} en el datáfono y escribe aquí el número de autorización del voucher.`);
+      $("inp-card-auth").focus();
+      return;
+    }
+    if (ult && !/^[0-9]{4}$/.test(ult)) { alert("Los últimos dígitos de la tarjeta son 4 números (o déjalo vacío)."); $("inp-card-last4").focus(); return; }
+    tarjeta = { card_auth_code: aut, card_last4: ult || null };
+  }
+
   // De dónde salió el peso. El servidor lo revisa y clasifica la venta; lo
   // que se manda aquí es la evidencia, no la conclusión.
   let peso;
@@ -1541,6 +1570,7 @@ async function chargeSale(force) {
     customer_tax_id: $("inp-customer-taxid").value || null,
     lines: result.lines,
     ...peso,
+    ...tarjeta,
   };
 
   // Al servidor se le dice QUÉ cliente y CUÁNTOS PUNTOS quiere canjear. El
@@ -1631,6 +1661,7 @@ ${t.doc}
 Comprobante interno #${folio || "(pendiente)"}
 Fecha: ${new Date(payload.created_at).toLocaleString()}
 Cliente: ${esc(payload.customer_name || "Consumidor Final")}
+Pago: ${esc(PAGO_LABELS[payload.payment_method] || payload.payment_method || "")}${payload.card_auth_code ? ` · Aut. ${esc(payload.card_auth_code)}` : ""}${payload.card_last4 ? ` · ****${esc(payload.card_last4)}` : ""}
 ------------------------------
 ${items}
 ------------------------------
@@ -2044,6 +2075,27 @@ async function renderClosing() {
     ? `Pedidos anulados: ${anulaciones} (${fmtWeightShort(anuladoG)} pesados). El detalle está en Control de pesos.`
     : "Pedidos anulados: ninguno.");
   $("closing-pay-note").textContent = notas.join(" ");
+
+  // Vouchers del día. Un número repetido o una venta sin número se marcan:
+  // son justo lo que hay que revisar contra el cierre de lote del datáfono.
+  const vouchers = [];
+  results.forEach((c) => (c.vouchers || []).forEach((v) => vouchers.push({ ...v, tienda: results.length > 1 ? c.locationName : "" })));
+  vouchers.sort((a, b) => String(a.hora).localeCompare(String(b.hora)));
+  const vecesAut = {};
+  vouchers.forEach((v) => { if (v.autorizacion) vecesAut[v.autorizacion] = (vecesAut[v.autorizacion] || 0) + 1; });
+  const vBody = document.querySelector("#table-closing-vouchers tbody");
+  vBody.innerHTML = vouchers.length ? "" : '<tr><td colspan="5" class="hint">No hubo ventas con tarjeta ese día.</td></tr>';
+  vouchers.forEach((v) => {
+    const tr = document.createElement("tr");
+    const malo = !v.autorizacion || vecesAut[v.autorizacion] > 1;
+    if (malo) tr.className = "row-bad";
+    tr.innerHTML = `<td>${esc(new Date(v.hora).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))}${v.tienda ? ` · ${esc(v.tienda)}` : ""}</td>
+      <td class="num">${esc(v.folio)}</td>
+      <td>${v.autorizacion ? esc(v.autorizacion) + (vecesAut[v.autorizacion] > 1 ? " (repetida)" : "") : "SIN AUTORIZACIÓN"}</td>
+      <td>${v.ultimos4 ? "****" + esc(v.ultimos4) : "—"}</td>
+      <td class="num">${money(v.total)}</td>`;
+    vBody.appendChild(tr);
+  });
 
   // Tabla de toppings: si es consolidado, se juntan las tiendas y se recalcula el %.
   const agg = {};

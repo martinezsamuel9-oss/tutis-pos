@@ -68,6 +68,7 @@ sql/11_huella.sql           autorizar con la huella del teléfono de la gerente 
 sql/12_compras_y_cierre.sql libro de compras (purchases), cierre por forma de pago y funciones de respaldo
 sql/14_productos.sql        productos de precio fijo (agua, bebidas, porciones…), línea 'producto' con cantidad
 sql/15_productos_icg.sql    los productos legibles del video de la caja ICG, con precio CON ISV
+sql/16_tarjeta.sql          voucher de cada venta con tarjeta (autorización + últimos 4) y lista en el cierre
 sql/13_privilegios.sql      quita TRUNCATE, TRIGGER, REFERENCES y MAINTAIN (PG17) a anon y authenticated,
                             también para las tablas futuras (TRUNCATE se salta RLS)
 cierre-diario/      Worker programado: manda el cierre y respalda la base en R2 (ver su LEEME.md)
@@ -76,7 +77,7 @@ wallet/secretos/    llave y certificado de Apple — GITIGNORADO, nunca al repo
 sql/pruebas/        prueba_aislamiento.sql (13) + prueba_seguridad.sql (48 ataques)
                     + prueba_fidelizacion.sql (19) + prueba_pesos.sql (48)
                     + prueba_huella.sql (12) + prueba_compras.sql (28)
-                    + prueba_productos.sql (14)
+                    + prueba_productos.sql (14) + prueba_tarjeta.sql (7)
                     + borrar_datos_de_prueba.sql (quita las demostraciones)
                     + datos_de_demostracion.sql (14 días de ventas, borrables)
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
@@ -466,6 +467,24 @@ con familias de colores como ICG. Lo que no hay que deshacer:
    como producto por unidad hasta decidir cómo se pesa. En ICG no se elige
    sabor: la taza es "Oz Frozen Yogurt Mix".
 
+## 3.8 Tarjeta: el voucher amarrado a la venta
+
+El datáfono todavía NO está integrado con la caja (depende del banco: hace
+falta su protocolo o SDK de integración con cajas). Mientras tanto
+(2026-10-21): al elegir Tarjeta la caja muestra el monto en grande para
+teclearlo en el datáfono y **no cobra sin el número de autorización del
+voucher**; los últimos 4 dígitos son opcionales. El cierre trae la lista de
+vouchers para cuadrar contra el cierre de lote del datáfono. Lo que no hay
+que deshacer:
+
+1. **Nunca se guarda el número completo de la tarjeta**: la base solo acepta
+   4 dígitos (`sales_card_last4_chk`). Guardarlo metería al negocio en PCI.
+2. **El servidor limpia, no rechaza** (`process_sale`): una autorización mal
+   formada queda vacía y la venta entra igual (puede venir de la cola sin
+   conexión); el reporte la marca "SIN AUTORIZACIÓN".
+3. **Autorización repetida o vacía va en rojo** en Reportes y en el correo:
+   es como se destapa una venta en efectivo pasada como tarjeta.
+
 ## 4. Restricciones permanentes (pedidas explícitamente)
 
 - **NUNCA incluir el sitio web `https://tutis.innova504.com/` en la factura o
@@ -625,6 +644,8 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/11_huella.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/12_compras_y_cierre.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/13_privilegios.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/14_productos.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/15_productos_icg.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/16_tarjeta.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_aislamiento.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_seguridad.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_fidelizacion.sql
@@ -632,6 +653,7 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_pesos.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_huella.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_compras.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_productos.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_tarjeta.sql
 ```
 
 `00_simulacion_supabase.sql` recrea lo que Supabase ya trae (schema `auth`,
