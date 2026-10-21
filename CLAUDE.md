@@ -435,6 +435,11 @@ la venta todo se toca con el dedo. Lo que no hay que deshacer:
    quedar fuera de la vista; el total grande junto al botón no.
 4. **Cada venta arranca en Efectivo.** Si no, una "Tarjeta" de la venta
    anterior se colaría en el cuadre por forma de pago.
+5. **Costo y margen en el ticket de venta: solo la propietaria** (pedido del
+   dueño, 2026-10-21). La cajera y la gerente ven peso y total, no costo,
+   margen ni los avisos de margen. Es solo la pantalla: el costo de cada línea
+   igual viaja en la venta, y la gerente sigue viendo costos donde los
+   administra (Inventario, Toppings, Reportes).
 
 ## 4. Restricciones permanentes (pedidas explícitamente)
 

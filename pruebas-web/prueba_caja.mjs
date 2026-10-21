@@ -90,6 +90,8 @@ const texto = (page, sel) => page.locator(sel).innerText();
   ok(total.includes("87.75"), "6 150 g + 30 g + vaso 15 g a 0.45/g = 87.75", total);
 
   ok((await texto(page, "#charge-total")).includes("87.75"), "6b el total también está junto al botón de cobrar");
+  const ticketCajera = await texto(page, "#tab-venta .ticket-card");
+  ok(!/costo|margen/i.test(ticketCajera), "6d la cajera no ve costo ni margen en el ticket", ticketCajera.match(/.*(costo|margen).*/i));
   await page.click('#tiles-payment .tile:has-text("Tarjeta")');
   await page.click("#btn-charge");
   await page.waitForSelector("#receipt-modal:not([hidden])");
@@ -324,6 +326,20 @@ const texto = (page, sel) => page.locator(sel).innerText();
      "28e la compra va completa y sin firmar a nombre de nadie (lo pone la base)", compra);
   ok(g.errores.length === 0, "28f sin errores de JavaScript (compras)", g.errores);
   await g.ctx.close();
+}
+
+/* ---------------- Costo y margen: solo la propietaria ---------------- */
+{
+  const g = await abrir("gerente");
+  await g.page.click('.tab-btn[data-tab="venta"]');
+  ok(!/costo|margen/i.test(await texto(g.page, "#tab-venta .ticket-card")), "29 la gerente tampoco ve costo ni margen al vender");
+  await g.ctx.close();
+  const o = await abrir("propietario");
+  await o.page.click('.tab-btn[data-tab="venta"]');
+  const t = await texto(o.page, "#tab-venta .ticket-card");
+  ok(t.includes("Costo real") && t.includes("Margen"), "29b la propietaria sí ve costo y margen", t.slice(0, 200));
+  ok(o.errores.length === 0, "29c sin errores de JavaScript (propietaria)", o.errores);
+  await o.ctx.close();
 }
 
 await browser.close();

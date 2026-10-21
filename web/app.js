@@ -1317,10 +1317,14 @@ function renderQuote() {
   const toppingsG = r2(result.gross_weight_g - iceG - tareG);
   const manual = PESO.modo === "manual";
 
+  // Costo, margen y sus avisos solo los ve la propietaria (lo pidió el dueño,
+  // 2026-10-21; en ICG la caja tampoco los muestra). Es solo la pantalla: el
+  // costo de cada línea igual viaja en la venta, porque así se registra.
+  const verCosto = isOwner();
   linesEl.innerHTML = result.lines.map((l) => `
     <div class="ticket-line">
       <span class="tl-name">${esc(l.name)}
-        <span class="tl-meta">${l.weight_g ? fmtWeightShort(l.weight_g) + " · " : ""}costo ${money(l.cost)}${l.is_premium_surcharge ? " · premium" : ""}</span>
+        <span class="tl-meta">${[l.weight_g ? fmtWeightShort(l.weight_g) : "", verCosto ? `costo ${money(l.cost)}` : "", l.is_premium_surcharge ? "premium" : ""].filter(Boolean).join(" · ")}</span>
       </span>
       <span class="num">${money(l.price_contribution)}</span>
     </div>`).join("");
@@ -1331,8 +1335,8 @@ function renderQuote() {
     <div><span>Peso de toppings</span><span class="num">${fmtWeightShort(toppingsG)}</span></div>
     <div><span>Peso total</span><span class="num">${fmtWeight(result.gross_weight_g)}</span></div>
     <div><span>Origen del peso</span><span>${manual ? "A mano — requiere PIN" : (PESO.capturas.length ? "Báscula · fijo" : "Báscula")}</span></div>
-    <div><span>Costo real</span><span class="num">${money(result.total_cost)}</span></div>
-    <div><span>Margen</span><span class="num">${money(result.margin)} (${result.margin_pct}%)</span></div>
+    ${verCosto ? `<div><span>Costo real</span><span class="num">${money(result.total_cost)}</span></div>
+    <div><span>Margen</span><span class="num">${money(result.margin)} (${result.margin_pct}%)</span></div>` : ""}
     <div class="tt-total"><span>Total</span><span class="num">${money(result.total_price)}</span></div>`;
 
   // El tope depende del total, así que se vuelve a preguntar cuando cambia,
@@ -1346,7 +1350,7 @@ function renderQuote() {
   }
   pintarPreviaPuntos(previaFidelizacion(result.total_price), result.total_price);
 
-  const alerts = [...result.alerts];
+  const alerts = verCosto ? [...result.alerts] : [];
   alertsEl.innerHTML = alerts.map((a) => `<div class="alert warn">${esc(a)}</div>`).join("");
 }
 
