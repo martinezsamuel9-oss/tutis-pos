@@ -259,6 +259,14 @@
             <div class="chip-grid" id="topping-chips"></div>
             <div id="order-rows"></div>
           </div>
+
+          <div class="card" id="products-card">
+            <h2>Otros productos</h2>
+            <div class="sub">Bebidas, rolls, bites, porciones para llevar… Se cobran por unidad, sin pesar. Pueden ir solos o con la taza.</div>
+            <div class="tiles fam-tabs" id="product-families" role="tablist" aria-label="Familias"></div>
+            <div class="tiles" id="product-tiles" style="margin-top:10px;"></div>
+            <div id="product-rows"></div>
+          </div>
         </div>
 
         <div>
@@ -361,6 +369,21 @@
         <div class="field"><label>Costo c/u</label><input id="ns-cost" type="number" step="0.01"></div>
         <div class="field"><label>Stock inicial</label><input id="ns-stock" type="number"></div>
         <button class="btn primary" id="btn-add-supply">Agregar insumo</button>
+      </div>
+
+      <div class="card">
+        <h2>Productos de precio fijo</h2>
+        <div class="sub">Lo que se vende por unidad, como en ICG: bebidas, rolls, bites, porciones para llevar. El precio es el que paga el cliente, con ISV. El aviso le aparece a la cajera al tocar el producto (por ejemplo, "Ofrezca agua o algo para llevar"). Existencias vacías = no se controlan.</div>
+        <div class="table-wrap"><table class="data" id="table-products">
+          <thead><tr><th>Familia</th><th>Producto</th><th>Precio</th><th>Costo</th><th>Existencias</th><th>Aviso</th><th></th></tr></thead><tbody></tbody>
+        </table></div>
+        <div class="field" style="margin-top:14px;"><label for="np-family">Familia</label><input id="np-family" list="np-families" placeholder="Ej. Bebidas" maxlength="40"><datalist id="np-families"></datalist></div>
+        <div class="field stack"><label for="np-name">Producto</label><input id="np-name" placeholder="Ej. Agua en botella" maxlength="80"></div>
+        <div class="field"><label for="np-price">Precio (con ISV)</label><input id="np-price" type="number" step="0.01" min="0"></div>
+        <div class="field"><label for="np-cost">Costo</label><input id="np-cost" type="number" step="0.01" min="0"></div>
+        <div class="field"><label for="np-stock">Existencias</label><input id="np-stock" type="number" step="1" placeholder="Opcional"></div>
+        <div class="field stack"><label for="np-upsell">Aviso para la cajera</label><input id="np-upsell" maxlength="160" placeholder="Opcional"></div>
+        <button class="btn primary" id="btn-add-product">Agregar producto</button>
       </div>
     </section>
 

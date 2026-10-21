@@ -328,6 +328,41 @@ const texto = (page, sel) => page.locator(sel).innerText();
   await g.ctx.close();
 }
 
+/* ---------------- Productos de precio fijo ---------------- */
+{
+  const { ctx, page, errores } = await abrir("cajera");
+  ok(await page.locator("#products-card").isHidden(), "30 sin productos en el catálogo, la tarjeta no aparece");
+  await page.evaluate(() => localStorage.setItem("fake_products", JSON.stringify([
+    { id: "P1", location_id: "L1", family: "Bebidas", name: "Agua en botella", price: 25, cost: 8, stock_qty: 10, upsell: null, active: true },
+    { id: "P2", location_id: "L1", family: "Bebidas", name: "Latte frío", price: 65, cost: 20, stock_qty: null, upsell: null, active: true },
+    { id: "P3", location_id: "L1", family: "Toppings", name: "Topping premium (porción)", price: 30, cost: 9, stock_qty: null, upsell: "Ofrezca agua o algo para llevar.", active: true },
+  ])));
+  await page.reload(); await page.waitForSelector("#app:not([hidden])");
+  ok(await page.locator("#products-card").isVisible() && (await page.locator("#product-families .tile").count()) === 2,
+     "30b con productos aparecen sus familias como cuadros");
+  await page.click('#product-tiles .tile:has-text("Agua en botella")');
+  await page.click('#product-tiles .tile:has-text("Agua en botella")');
+  ok((await texto(page, "#product-rows")).includes("2") && (await texto(page, "#charge-total")).includes("50.00"),
+     "30c dos toques = 2 aguas, total 50 (sin vaso: no hay taza)");
+  ok(!(await texto(page, "#ticket-lines")).includes("Vaso"), "30d una venta de solo productos no cobra vaso ni cuchara");
+  await page.click('#product-rows button[aria-label="Quitar uno"]');
+  ok((await texto(page, "#charge-total")).includes("25.00"), "30e el − quita uno");
+  await page.click('#product-families .tile:has-text("Toppings")');
+  await page.click('#product-tiles .tile:has-text("Topping premium")');
+  ok((await texto(page, "#ticket-alerts")).includes("Ofrezca agua"), "30f el aviso del producto le aparece a la cajera");
+  await page.click("#btn-charge");
+  await page.waitForSelector("#receipt-modal:not([hidden])");
+  const v = (await rpcs(page, "process_sale")).pop().args.payload;
+  const tipos = v.lines.map((l) => l.item_type).join(",");
+  ok(tipos === "producto,producto" && v.lines[0].quantity === 1 && v.lines.every((l) => l.weight_g === 0),
+     "30g la venta lleva solo las líneas de producto, con cantidad y sin peso", v.lines);
+  ok((await texto(page, "#receipt-body")).includes("1 × Agua en botella"), "30h el recibo dice la cantidad");
+  await page.click("#btn-close-receipt");
+  ok((await page.locator("#product-rows .product-row").count()) === 0, "30i la siguiente venta arranca sin productos");
+  ok(errores.length === 0, "30j sin errores de JavaScript (productos)", errores);
+  await ctx.close();
+}
+
 /* ---------------- Costo y margen: solo la propietaria ---------------- */
 {
   const g = await abrir("gerente");

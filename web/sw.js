@@ -25,7 +25,7 @@
    Cómo publicar una versión nueva: sube CACHE_VERSION. Eso borra la caché
    anterior y obliga a bajar los archivos otra vez.
    =========================================================================== */
-const CACHE_VERSION = "tutis-v19";
+const CACHE_VERSION = "tutis-v20";
 
 const APP_SHELL = [
   "./",

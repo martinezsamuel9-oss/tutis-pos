@@ -148,7 +148,7 @@ if (CONFIGURED) {
 const STATE = {
   session: null, profile: null,
   locations: [], activeLocationId: null,
-  flavors: [], toppings: [], supplies: [], sales: [], profiles: [],
+  flavors: [], toppings: [], supplies: [], products: [], sales: [], profiles: [],
   pending: [],
 };
 
@@ -247,7 +247,7 @@ setInterval(() => { if (navigator.onLine) syncPending(); }, 60000);
    no todos los toppings cuestan lo mismo. Los toppings "tier 2" llevan un
    recargo por gramo para que no se coman el margen.
    =========================================================================== */
-function computeSale({ pricePerGram, includeCupWeight, iceCream, toppings, cup, spoon, marginTargetPct }) {
+function computeSale({ pricePerGram, includeCupWeight, iceCream, toppings, cup, spoon, marginTargetPct, products = [] }) {
   const lines = [];
   const tareG = cup ? (cup.tare_weight_g || 0) : 0;
   const toppingsWeightSum = toppings.reduce((s, t) => s + t.weight_g, 0);
@@ -290,6 +290,14 @@ function computeSale({ pricePerGram, includeCupWeight, iceCream, toppings, cup, 
     } else if (t.weight_g > 0 && lineMarginPct < marginTargetPct) {
       alerts.push(`El margen del topping "${t.name}" (${r2(lineMarginPct)}%) está bajo la meta (${marginTargetPct}%).`);
     }
+  }
+
+  // Productos de precio fijo: precio por unidad, sin peso.
+  for (const p of products) {
+    const price = r2(p.qty * p.price), cost = r2(p.qty * p.cost);
+    lines.push({ item_type: "producto", ref_id: p.id, name: p.name, quantity: p.qty, weight_g: 0,
+                 cost, price_contribution: price, is_premium_surcharge: false });
+    totalPrice += price; totalCost += cost;
   }
 
   const margin = totalPrice - totalCost;
@@ -503,14 +511,16 @@ async function loadData() {
     lsSet(LS.lastLocation, STATE.activeLocationId);
 
     const locId = STATE.activeLocationId;
-    const [fl, tp, sp] = await Promise.all([
+    const [fl, tp, sp, pr] = await Promise.all([
       sb.from("flavors").select("*").eq("location_id", locId).eq("active", true).order("name"),
       sb.from("toppings").select("*").eq("location_id", locId).eq("active", true).order("name"),
       sb.from("supplies").select("*").eq("location_id", locId).eq("active", true).order("name"),
+      sb.from("products").select("*").eq("location_id", locId).eq("active", true).order("family").order("sort").order("name"),
     ]);
     STATE.flavors = fl.data || [];
     STATE.toppings = tp.data || [];
     STATE.supplies = sp.data || [];
+    STATE.products = pr.data || [];
 
     let salesQuery = sb.from("sales").select("*, locations(name)").order("created_at", { ascending: false }).limit(200);
     if (!isOwner()) salesQuery = salesQuery.eq("location_id", locId);
@@ -534,7 +544,7 @@ async function loadData() {
 function cacheCatalog() {
   lsSet(LS.catalog(STATE.activeLocationId), {
     location: activeLocation(),
-    flavors: STATE.flavors, toppings: STATE.toppings, supplies: STATE.supplies,
+    flavors: STATE.flavors, toppings: STATE.toppings, supplies: STATE.supplies, products: STATE.products,
     savedAt: new Date().toISOString(),
   });
 }
@@ -548,6 +558,7 @@ function loadFromCache() {
   STATE.flavors = cached.flavors || [];
   STATE.toppings = cached.toppings || [];
   STATE.supplies = cached.supplies || [];
+  STATE.products = cached.products || [];
 }
 
 function renderAll() {
@@ -557,9 +568,11 @@ function renderAll() {
   pintarModo();
   renderToppingChips();
   renderOrderRows();
+  renderProductos();
   renderQuote();
   if (canManage()) {
     renderInventory();
+    renderProductsTable();
     renderToppingsTable();
     renderReports();
     renderClosing();
@@ -596,6 +609,9 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
    =========================================================================== */
 let iceUnit = "g";
 const orderRows = [];
+// Productos de precio fijo del pedido en curso: [{ productId, qty }]. No se
+// pesan, así que se pueden quitar sin anular (no hay nada fijo que proteger).
+const pedidoProductos = [];
 
 /* --- Lo pesado queda fijo ----------------------------------------------------
    Regla del negocio (2026-10-07). En el sistema anterior la cajera leía la
@@ -840,16 +856,82 @@ function renderOrderRows() {
   });
 }
 
+/* --- Productos de precio fijo -------------------------------------------------
+   Como en ICG: arriba las familias, abajo sus productos en cuadros. Tocar un
+   producto lo suma al pedido; las líneas tienen − y + para la cantidad. */
+let familiaProducto = null;
+function renderProductos() {
+  const card = $("products-card");
+  if (!card) return;
+  card.hidden = !STATE.products.length;
+  if (!STATE.products.length) return;
+  const familias = [...new Set(STATE.products.map((p) => p.family))];
+  if (!familias.includes(familiaProducto)) familiaProducto = familias[0];
+
+  const fam = $("product-families");
+  fam.innerHTML = "";
+  familias.forEach((f, i) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = `tile fam-tab fam-color-${i % 8}`;
+    b.setAttribute("role", "tab"); b.setAttribute("aria-selected", String(f === familiaProducto));
+    b.innerHTML = `<span class="tile-name">${esc(f)}</span>`;
+    b.addEventListener("click", () => { familiaProducto = f; renderProductos(); });
+    fam.appendChild(b);
+  });
+
+  const tiles = $("product-tiles");
+  tiles.innerHTML = "";
+  STATE.products.filter((p) => p.family === familiaProducto).forEach((p) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "tile product-tile";
+    const agotado = p.stock_qty != null && Number(p.stock_qty) <= 0;
+    b.innerHTML = `<span class="tile-price num">${money(p.price)}</span><span class="tile-name">${esc(p.name)}</span>` +
+      (agotado ? `<span class="tile-sub">sin existencias</span>` : "");
+    b.addEventListener("click", () => {
+      const x = pedidoProductos.find((y) => y.productId === p.id);
+      if (x) x.qty += 1; else pedidoProductos.push({ productId: p.id, qty: 1 });
+      renderProductos(); renderQuote();
+    });
+    tiles.appendChild(b);
+  });
+
+  const rows = $("product-rows");
+  rows.innerHTML = "";
+  pedidoProductos.forEach((x) => {
+    const p = STATE.products.find((y) => y.id === x.productId);
+    if (!p) return;
+    const div = document.createElement("div");
+    div.className = "product-row";
+    div.innerHTML = `<span class="pr-name">${esc(p.name)}</span>
+      <button type="button" class="btn ghost pr-btn" aria-label="Quitar uno">−</button>
+      <span class="pr-qty num">${x.qty}</span>
+      <button type="button" class="btn ghost pr-btn" aria-label="Agregar uno">+</button>
+      <span class="pr-total num">${money(r2(x.qty * Number(p.price)))}</span>`;
+    const [menos, mas] = div.querySelectorAll(".pr-btn");
+    menos.addEventListener("click", () => {
+      x.qty -= 1;
+      if (x.qty <= 0) pedidoProductos.splice(pedidoProductos.indexOf(x), 1);
+      renderProductos(); renderQuote();
+    });
+    mas.addEventListener("click", () => { x.qty += 1; renderProductos(); renderQuote(); });
+    rows.appendChild(div);
+  });
+}
+
 function buildPlan() {
   const loc = activeLocation();
   if (!loc) return null;
   const flavor = STATE.flavors.find((f) => f.id === $("sel-flavor").value);
   const cupRow = STATE.supplies.find((s) => s.id === $("sel-cup").value);
   const spoonRow = $("chk-spoon").checked ? STATE.supplies.find((s) => s.id === $("sel-spoon").value) : null;
-  if (!flavor || !cupRow) return null;
+  const productos = pedidoProductos.map((x) => {
+    const p = STATE.products.find((y) => y.id === x.productId);
+    return p ? { id: p.id, name: p.name, qty: x.qty, price: Number(p.price) || 0, cost: Number(p.cost) || 0, stock_qty: p.stock_qty } : null;
+  }).filter(Boolean);
+  if ((!flavor || !cupRow) && !productos.length) return null;
 
   const manual = PESO.modo === "manual";
-  const cupWeightG = Number(cupRow.tare_weight_g) || 0;
+  const cupWeightG = cupRow ? Number(cupRow.tare_weight_g) || 0 : 0;
   const iceWeightG = manual ? toGrams(parseFloat($("inp-ice-weight").value) || 0, iceUnit) : PESO.heladoG;
 
   const toppings = orderRows.map((row) => {
@@ -859,16 +941,22 @@ function buildPlan() {
              cost_per_gram: Number(t.cost_per_gram), tier: t.tier, surcharge_per_gram: Number(t.surcharge_per_gram) };
   }).filter((t) => t && t.weight_g > 0);   // una línea todavía sin pesar no va al ticket
 
+  // Hay taza cuando ya hay helado o toppings con peso. Una venta de solo
+  // productos (un agua, un roll) no cobra vaso ni cuchara.
+  const hayTaza = !!flavor && !!cupRow && (iceWeightG > 0 || toppings.length > 0);
+
   return {
-    loc, flavorRow: flavor, cupRow, spoonRow, cupWeightG, iceWeightG, toppings,
+    loc, flavorRow: flavor, cupRow, spoonRow, cupWeightG, iceWeightG, toppings, productos, hayTaza,
     args: {
       pricePerGram: Number(loc.price_per_gram),
       includeCupWeight: loc.include_cup_weight_in_price,
       marginTargetPct: Number(loc.margin_target_pct),
-      iceCream: { id: flavor.id, name: flavor.name, weight_g: iceWeightG, cost_per_gram: Number(flavor.cost_per_gram) },
-      toppings,
-      cup: { id: cupRow.id, name: cupRow.name, tare_weight_g: cupWeightG, cost_per_unit: Number(cupRow.cost_per_unit) },
-      spoon: spoonRow ? { id: spoonRow.id, name: spoonRow.name, cost_per_unit: Number(spoonRow.cost_per_unit) } : null,
+      iceCream: flavor ? { id: flavor.id, name: flavor.name, weight_g: hayTaza ? iceWeightG : 0, cost_per_gram: Number(flavor.cost_per_gram) }
+                       : { id: null, name: "", weight_g: 0, cost_per_gram: 0 },
+      toppings: hayTaza ? toppings : [],
+      cup: hayTaza ? { id: cupRow.id, name: cupRow.name, tare_weight_g: cupWeightG, cost_per_unit: Number(cupRow.cost_per_unit) } : null,
+      spoon: hayTaza && spoonRow ? { id: spoonRow.id, name: spoonRow.name, cost_per_unit: Number(spoonRow.cost_per_unit) } : null,
+      products: productos,
     },
   };
 }
@@ -876,7 +964,7 @@ function buildPlan() {
 /* --- Pesar ------------------------------------------------------------------ */
 async function pesar(que, row, boton) {
   const plan = buildPlan();
-  if (!plan) { alert("Selecciona vaso y sabor."); return; }
+  if (!plan || !plan.flavorRow || !plan.cupRow) { alert("Selecciona vaso y sabor."); return; }
   if (que === "topping" && !(PESO.heladoG > 0)) {
     pintarEstadoBascula("Primero pesa el helado: los toppings se pesan sobre el mismo vaso, después.", true);
     return;
@@ -952,6 +1040,7 @@ function limpiarPedido() {
   PESO.ultimoBruto = null;
   PESO.heladoG = 0;
   orderRows.length = 0;
+  pedidoProductos.length = 0;
   $("inp-ice-weight").value = "";
   // Cada venta arranca en efectivo, como en ICG: así una tarjeta de la venta
   // anterior no se cuela en el cuadre de la siguiente.
@@ -959,6 +1048,7 @@ function limpiarPedido() {
   try { localStorage.removeItem(LS_PEDIDO); } catch (e) {}
   pintarModo();
   renderOrderRows();
+  renderProductos();
   renderQuote();
 }
 
@@ -1313,7 +1403,7 @@ function renderQuote() {
   }
 
   const result = computeSale(plan.args);
-  const tareG = plan.cupWeightG, iceG = plan.iceWeightG;
+  const tareG = plan.hayTaza ? plan.cupWeightG : 0, iceG = plan.hayTaza ? plan.iceWeightG : 0;
   const toppingsG = r2(result.gross_weight_g - iceG - tareG);
   const manual = PESO.modo === "manual";
 
@@ -1323,18 +1413,20 @@ function renderQuote() {
   const verCosto = isOwner();
   linesEl.innerHTML = result.lines.map((l) => `
     <div class="ticket-line">
-      <span class="tl-name">${esc(l.name)}
+      <span class="tl-name">${l.item_type === "producto" && l.quantity !== 1 ? `${l.quantity} × ` : ""}${esc(l.name)}
         <span class="tl-meta">${[l.weight_g ? fmtWeightShort(l.weight_g) : "", verCosto ? `costo ${money(l.cost)}` : "", l.is_premium_surcharge ? "premium" : ""].filter(Boolean).join(" · ")}</span>
       </span>
       <span class="num">${money(l.price_contribution)}</span>
     </div>`).join("");
 
-  totalsEl.innerHTML = `
+  // Sin taza (solo productos) no hay pesos que mostrar.
+  const conPesos = plan.hayTaza || hayPesado() || orderRows.length > 0;
+  totalsEl.innerHTML = (conPesos ? `
     <div><span>Peso del vaso (tara)</span><span class="num">${fmtWeightShort(tareG)}</span></div>
     <div><span>Peso del helado</span><span class="num">${fmtWeightShort(iceG)}</span></div>
     <div><span>Peso de toppings</span><span class="num">${fmtWeightShort(toppingsG)}</span></div>
     <div><span>Peso total</span><span class="num">${fmtWeight(result.gross_weight_g)}</span></div>
-    <div><span>Origen del peso</span><span>${manual ? "A mano — requiere PIN" : (PESO.capturas.length ? "Báscula · fijo" : "Báscula")}</span></div>
+    <div><span>Origen del peso</span><span>${manual ? "A mano — requiere PIN" : (PESO.capturas.length ? "Báscula · fijo" : "Báscula")}</span></div>` : "") + `
     ${verCosto ? `<div><span>Costo real</span><span class="num">${money(result.total_cost)}</span></div>
     <div><span>Margen</span><span class="num">${money(result.margin)} (${result.margin_pct}%)</span></div>` : ""}
     <div class="tt-total"><span>Total</span><span class="num">${money(result.total_price)}</span></div>`;
@@ -1351,7 +1443,13 @@ function renderQuote() {
   pintarPreviaPuntos(previaFidelizacion(result.total_price), result.total_price);
 
   const alerts = verCosto ? [...result.alerts] : [];
-  alertsEl.innerHTML = alerts.map((a) => `<div class="alert warn">${esc(a)}</div>`).join("");
+  // Avisos de venta para la cajera (como el "Ofrezca agua o algo para
+  // llevar" de ICG): los del producto que se tocó y, con la taza ya servida,
+  // el recordatorio de ofrecer una bebida si todavía no lleva productos.
+  const avisos = [...new Set(plan.productos.map((p) => (STATE.products.find((x) => x.id === p.id) || {}).upsell).filter(Boolean))];
+  if (plan.hayTaza && !plan.productos.length && STATE.products.length) avisos.push("Ofrézcale agua o algo para llevar.");
+  alertsEl.innerHTML = avisos.map((a) => `<div class="alert ok">${esc(a)}</div>`).join("") +
+                       alerts.map((a) => `<div class="alert warn">${esc(a)}</div>`).join("");
 }
 
 // El total, grande junto al botón de cobrar: con el ticket largo, la línea de
@@ -1381,7 +1479,7 @@ $("btn-charge").addEventListener("click", () => chargeSale(false));
 
 async function chargeSale(force) {
   const plan = buildPlan();
-  if (!plan) { alert("Selecciona vaso y sabor."); return; }
+  if (!plan) { alert("El pedido está vacío: pesa la taza o toca un producto."); return; }
   const manual = PESO.modo === "manual";
   if (!manual) {
     const sinPesar = orderRows.filter((r) => r.pesadoG == null)
@@ -1389,15 +1487,24 @@ async function chargeSale(force) {
     if (sinPesar.length) { alert(`Falta pesar: ${sinPesar.join(", ")}.\n\nPésalo o quítalo de la lista.`); return; }
   }
   const result = computeSale(plan.args);
-  if (result.total_price <= 0) { alert(manual ? "La venta está en cero: teclea el peso del helado o de los toppings." : "La venta está en cero: pesa el helado."); return; }
+  if (result.total_price <= 0) {
+    alert(plan.productos.length ? "La venta está en cero: revisa el precio de los productos."
+      : manual ? "La venta está en cero: teclea el peso del helado o de los toppings." : "La venta está en cero: pesa el helado.");
+    return;
+  }
 
   const warnings = [];
-  if (plan.flavorRow.stock_grams < plan.iceWeightG) warnings.push(`Stock insuficiente de "${plan.flavorRow.name}".`);
-  plan.toppings.forEach((t) => {
-    const row = STATE.toppings.find((x) => x.id === t.id);
-    if (row && row.stock_grams < t.weight_g) warnings.push(`Stock insuficiente de topping "${row.name}".`);
+  if (plan.hayTaza) {
+    if (plan.flavorRow.stock_grams < plan.iceWeightG) warnings.push(`Stock insuficiente de "${plan.flavorRow.name}".`);
+    plan.toppings.forEach((t) => {
+      const row = STATE.toppings.find((x) => x.id === t.id);
+      if (row && row.stock_grams < t.weight_g) warnings.push(`Stock insuficiente de topping "${row.name}".`);
+    });
+    if (plan.cupRow.stock_qty < 1) warnings.push(`No hay vasos disponibles (${plan.cupRow.name}).`);
+  }
+  plan.productos.forEach((p) => {
+    if (p.stock_qty != null && Number(p.stock_qty) < p.qty) warnings.push(`Quedan ${Number(p.stock_qty)} de "${p.name}".`);
   });
-  if (plan.cupRow.stock_qty < 1) warnings.push(`No hay vasos disponibles (${plan.cupRow.name}).`);
   if (warnings.length && !force) {
     if (!confirm(warnings.join("\n") + "\n\n¿Registrar la venta de todos modos?")) return;
   }
@@ -1405,7 +1512,7 @@ async function chargeSale(force) {
   // De dónde salió el peso. El servidor lo revisa y clasifica la venta; lo
   // que se manda aquí es la evidencia, no la conclusión.
   let peso;
-  const pesadoG = r2(plan.iceWeightG + plan.toppings.reduce((s, t) => s + t.weight_g, 0));
+  const pesadoG = plan.hayTaza ? r2(plan.iceWeightG + plan.toppings.reduce((s, t) => s + t.weight_g, 0)) : 0;
   if (!manual) {
     peso = { weight_mode: "bascula", scale_gross_g: PESO.ultimoBruto, scale_log: PESO.capturas };
   } else if (pesadoG <= 0) {
@@ -1509,7 +1616,7 @@ function showReceipt(payload, result, folio, offline, servidor) {
   const t = TAX[loc.country_code] || TAX.HN;
   const items = result.lines
     .filter((l) => !(l.item_type === "cuchara" && l.price_contribution === 0))
-    .map((l) => `${esc(l.name)}${l.weight_g ? "  " + fmtWeightShort(l.weight_g) : ""}   ${money(l.price_contribution)}`)
+    .map((l) => `${l.item_type === "producto" ? `${l.quantity} × ` : ""}${esc(l.name)}${l.weight_g ? "  " + fmtWeightShort(l.weight_g) : ""}   ${money(l.price_contribution)}`)
     .join("\n");
 
   const logoSrc = logoSeguro(loc.logo_data_url);
@@ -1603,6 +1710,51 @@ function renderInventory() {
     sBody.appendChild(tr);
   });
 }
+
+function renderProductsTable() {
+  const body = document.querySelector("#table-products tbody");
+  if (!body) return;
+  body.innerHTML = STATE.products.length ? "" : '<tr><td colspan="7" class="hint">Todavía no hay productos de precio fijo.</td></tr>';
+  STATE.products.forEach((p) => {
+    const tr = document.createElement("tr");
+    if (p.stock_qty != null && Number(p.stock_qty) <= 0) tr.classList.add("low-stock");
+    tr.innerHTML = `<td><input data-f="family" maxlength="40" value="${esc(p.family)}"></td>
+      <td><input data-f="name" maxlength="80" value="${esc(p.name)}"></td>
+      <td><input data-f="price" type="number" step="0.01" min="0" value="${esc(p.price)}"></td>
+      <td><input data-f="cost" type="number" step="0.01" min="0" value="${esc(p.cost)}"></td>
+      <td><input data-f="stock_qty" type="number" step="1" value="${p.stock_qty == null ? "" : esc(p.stock_qty)}" placeholder="—"></td>
+      <td><input data-f="upsell" maxlength="160" value="${esc(p.upsell || "")}"></td>
+      <td>${rowActionsHtml()}</td>`;
+    const v = (f) => tr.querySelector(`[data-f="${f}"]`).value;
+    tr.querySelector(".btn-save").addEventListener("click", async () => {
+      if (!v("family").trim() || !v("name").trim()) { alert("Familia y nombre no pueden quedar vacíos."); return; }
+      await saveRow("products", p.id, {
+        family: v("family").trim(), name: v("name").trim(),
+        price: parseFloat(v("price")) || 0, cost: parseFloat(v("cost")) || 0,
+        stock_qty: v("stock_qty") === "" ? null : parseFloat(v("stock_qty")),
+        upsell: v("upsell").trim() || null,
+      });
+    });
+    tr.querySelector(".btn-del").addEventListener("click", async () => {
+      if (confirm(`¿Quitar "${p.name}" de la venta?`)) await saveRow("products", p.id, { active: false });
+    });
+    body.appendChild(tr);
+  });
+  $("np-families").innerHTML = [...new Set(STATE.products.map((p) => p.family))].map((f) => `<option value="${esc(f)}">`).join("");
+}
+
+$("btn-add-product").addEventListener("click", async () => {
+  const family = $("np-family").value.trim(), name = $("np-name").value.trim();
+  const price = parseFloat($("np-price").value);
+  if (!family || !name) { alert("Ponle familia y nombre al producto."); return; }
+  if (!(price >= 0)) { alert("Pon el precio que paga el cliente (con ISV)."); return; }
+  const stock = $("np-stock").value;
+  const ok = await insertRow("products", {
+    family, name, price, cost: parseFloat($("np-cost").value) || 0,
+    stock_qty: stock === "" ? null : parseFloat(stock), upsell: $("np-upsell").value.trim() || null,
+  });
+  if (ok) ["np-name", "np-price", "np-cost", "np-stock", "np-upsell"].forEach((id) => ($(id).value = ""));
+});
 
 async function saveRow(table, id, patch) {
   if (!navigator.onLine) { alert("Sin conexión: los cambios de inventario y precios necesitan internet. La pantalla de venta sí sigue funcionando."); return; }

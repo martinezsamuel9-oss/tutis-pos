@@ -66,6 +66,8 @@ sql/10_peso_fijo.sql        el peso lo pone la báscula: PIN de gerente, autoriz
                             clasificación de cada venta y pedidos anulados
 sql/11_huella.sql           autorizar con la huella del teléfono de la gerente (passkeys)
 sql/12_compras_y_cierre.sql libro de compras (purchases), cierre por forma de pago y funciones de respaldo
+sql/14_productos.sql        productos de precio fijo (agua, bebidas, porciones…), línea 'producto' con cantidad
+sql/15_productos_icg.sql    los productos legibles del video de la caja ICG, con precio CON ISV
 sql/13_privilegios.sql      quita TRUNCATE, TRIGGER, REFERENCES y MAINTAIN (PG17) a anon y authenticated,
                             también para las tablas futuras (TRUNCATE se salta RLS)
 cierre-diario/      Worker programado: manda el cierre y respalda la base en R2 (ver su LEEME.md)
@@ -74,6 +76,7 @@ wallet/secretos/    llave y certificado de Apple — GITIGNORADO, nunca al repo
 sql/pruebas/        prueba_aislamiento.sql (13) + prueba_seguridad.sql (48 ataques)
                     + prueba_fidelizacion.sql (19) + prueba_pesos.sql (48)
                     + prueba_huella.sql (12) + prueba_compras.sql (28)
+                    + prueba_productos.sql (14)
                     + borrar_datos_de_prueba.sql (quita las demostraciones)
                     + datos_de_demostracion.sql (14 días de ventas, borrables)
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
@@ -441,6 +444,28 @@ la venta todo se toca con el dedo. Lo que no hay que deshacer:
    igual viaja en la venta, y la gerente sigue viendo costos donde los
    administra (Inventario, Toppings, Reportes).
 
+## 3.7 Productos de precio fijo
+
+Pedido del dueño (2026-10-21): vender también lo que ICG vende por unidad
+(agua, bebidas, rolls, porciones de topping…). Tabla `products` por tienda,
+pestaña Inventario para administrarlos, tarjeta "Otros productos" en la venta
+con familias de colores como ICG. Lo que no hay que deshacer:
+
+1. **El precio guardado es CON ISV** (lo que paga el cliente). ICG muestra
+   sin ISV: L 21.74 → L 25.
+2. **Una venta de solo productos no cobra vaso ni cuchara** (`hayTaza` en
+   `buildPlan`: hay taza cuando hay helado o toppings con peso).
+3. **Un producto no lleva peso** y `process_sale` lo rechaza si trae: así no
+   se cuela en el cuadre de la báscula, que es solo del vaso. La cantidad se
+   valida (0 < q ≤ 1000) para que no se pueda "devolver" inventario.
+4. **Existencias opcionales** (`stock_qty` null = no se controla).
+5. **El aviso del producto** (`upsell`) le sale a la cajera al tocarlo, y con
+   la taza servida sale "Ofrézcale agua o algo para llevar" (en ICG eso lo
+   dispara "TC Adulto").
+6. **Pendiente**: Bubble Pop se vende POR ONZA y se pesa aparte; no entra
+   como producto por unidad hasta decidir cómo se pesa. En ICG no se elige
+   sabor: la taza es "Oz Frozen Yogurt Mix".
+
 ## 4. Restricciones permanentes (pedidas explícitamente)
 
 - **NUNCA incluir el sitio web `https://tutis.innova504.com/` en la factura o
@@ -599,12 +624,14 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/10_peso_fijo.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/11_huella.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/12_compras_y_cierre.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/13_privilegios.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/14_productos.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_aislamiento.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_seguridad.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_fidelizacion.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_pesos.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_huella.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_compras.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_productos.sql
 ```
 
 `00_simulacion_supabase.sql` recrea lo que Supabase ya trae (schema `auth`,

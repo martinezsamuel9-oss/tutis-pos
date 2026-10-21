@@ -241,6 +241,33 @@ main { padding: 20px 16px 60px; }
 .tile-badge { position: absolute; top: 8px; right: 8px; background: #12303A; color: #FFFFFF; font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 3px 7px; border-radius: 999px; }
 .topping-tile.tier2 { box-shadow: inset 0 0 0 3px #12303A; }
 
+/* Productos de precio fijo: familias de colores arriba (como ICG) y los
+   productos abajo con su precio en la esquina. Los colores de familia van con
+   el nombre escrito; todos los pares pasan 4.5:1. */
+.fam-tabs { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+.fam-tab { min-height: 64px; border: none; text-transform: uppercase; letter-spacing: .02em; font-size: 0.98rem; }
+.fam-tab[aria-selected="true"] { box-shadow: 0 0 0 4px var(--surface), 0 0 0 7px var(--ink); }
+.fam-color-0 { background: #7CC242; color: #1B1B1B; }
+.fam-color-1 { background: #F5C518; color: #1B1B1B; }
+.fam-color-2 { background: #7A3E9D; color: #FFFFFF; }
+.fam-color-3 { background: #B83227; color: #FFFFFF; }
+.fam-color-4 { background: #7B2D26; color: #FFFFFF; }
+.fam-color-5 { background: #2F6B4F; color: #FFFFFF; }
+.fam-color-6 { background: #EE8A2A; color: #1B1B1B; }
+.fam-color-7 { background: #4E6470; color: #FFFFFF; }
+.product-tile { min-height: 88px; justify-content: flex-end; padding-top: 30px; }
+.product-tile .tile-price { position: absolute; top: 8px; right: 8px; background: #1B1B1B; color: #F5C518; font-size: 0.85rem; padding: 2px 7px; border-radius: 6px; }
+.product-row { display: grid; grid-template-columns: minmax(0, 1fr) 52px 44px 52px 110px; gap: 8px; align-items: center; padding: 8px 0; border-bottom: 1px dashed var(--border); }
+.product-row .pr-name { font-weight: 700; }
+.product-row .pr-btn { min-height: 52px; font-size: 1.4rem; padding: 0; touch-action: manipulation; }
+.product-row .pr-qty { text-align: center; font-size: 1.2rem; font-weight: 700; }
+.product-row .pr-total { text-align: right; font-weight: 700; }
+#product-rows { margin-top: 10px; }
+@media (max-width: 600px) {
+  .product-row { grid-template-columns: minmax(0, 1fr) 48px 36px 48px; }
+  .product-row .pr-total { grid-column: 1 / -1; text-align: left; }
+}
+
 /* Pesar, cobrar y anular: grandes y fáciles de acertar. */
 .btn.touch-weigh { min-height: 60px; min-width: 130px; padding: 12px 20px; font-size: 1.1rem; border-radius: var(--radius-m); touch-action: manipulation; }
 .btn.touch-charge { min-height: 76px; margin-top: 16px; font-size: 1.3rem; border-radius: var(--radius-m); touch-action: manipulation; }
@@ -255,7 +282,11 @@ main { padding: 20px 16px 60px; }
    y Cobrar/Anular quedan pegados abajo: como la barra inferior de ICG, no
    hay que desplazarse para cobrar. En teléfono todo fluye normal. */
 @media (min-width: 900px) and (min-height: 600px) {
-  #tab-venta .ticket-card { position: sticky; top: 124px; max-height: calc(100vh - 140px); overflow-y: auto; padding-bottom: 0; }
+  /* Lo pegajoso es la COLUMNA (hija de la cuadrícula, tan alta como la
+     página), no la tarjeta: una tarjeta pegajosa dentro de una columna de su
+     mismo alto no tiene adónde moverse y se va con el scroll. */
+  #tab-venta .grid-2 > div:last-child { position: sticky; top: 124px; }
+  #tab-venta .ticket-card { max-height: calc(100vh - 140px); overflow-y: auto; padding-bottom: 0; }
   #tab-venta .charge-bar { position: sticky; bottom: 0; background: var(--surface); padding: 4px 0 16px; margin-top: 8px; box-shadow: 0 -10px 14px -10px rgba(18,48,58,0.18); }
 }
 
