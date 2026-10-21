@@ -79,6 +79,8 @@ const ICON_FINGER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 const ICON_MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>';
 const ICON_SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>';
 
+const PAGO_LABELS = { efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia", sin_dato: "Sin dato (ventas antiguas)" };
+
 function rowActionsHtml() {
   return `<div class="row-actions">
     <button class="icon-btn save btn-save" type="button" title="Guardar">${ICON_SAVE}</button>
@@ -582,6 +584,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     // alguien lo abre. Después se refresca solo al cambiar los filtros.
     if (btn.dataset.tab === "dashboard" && !DASH.loaded) loadDashboard();
     if (btn.dataset.tab === "gastos" && !GAS.loaded) cargarGastos();
+    if (btn.dataset.tab === "compras") { prepararCompras(); if (!CMP.loaded) cargarCompras(); }
     if (btn.dataset.tab === "clientes") { llenarReglas(); if (!CLI.loaded) cargarClientes(""); }
     if (btn.dataset.tab === "reportes") { cargarControlPesos(); prepararLibroVentas(); }
     if (btn.dataset.tab === "config") pintarEstadoPin();
@@ -1784,6 +1787,38 @@ async function renderClosing() {
     <div class="kpi"><div class="kpi-label">Ventas</div><div class="kpi-value num">${totals.ventas}</div></div>
     <div class="kpi"><div class="kpi-label">Ingresos</div><div class="kpi-value num">${money(totals.ingresos)}</div></div>`;
 
+  // Cuadre por forma de pago, sumando las tiendas si es consolidado.
+  const pagos = {};
+  let descuentos = 0, anulaciones = 0, anuladoG = 0;
+  results.forEach((c) => {
+    (c.por_pago || []).forEach((p) => {
+      const x = pagos[p.metodo] || (pagos[p.metodo] = { ventas: 0, total: 0 });
+      x.ventas += Number(p.ventas || 0); x.total += Number(p.total || 0);
+    });
+    descuentos += Number(c.descuentos || 0);
+    anulaciones += Number(c.anulaciones || 0); anuladoG += Number(c.anulado_g || 0);
+  });
+  const orden = { efectivo: 1, tarjeta: 2, transferencia: 3 };
+  const payBody = document.querySelector("#table-closing-pay tbody");
+  const metodos = Object.entries(pagos).sort((a, b) => (orden[a[0]] || 9) - (orden[b[0]] || 9));
+  payBody.innerHTML = metodos.length ? "" : '<tr><td colspan="3" class="hint">No hay ventas ese día.</td></tr>';
+  metodos.forEach(([m, x]) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${esc(PAGO_LABELS[m] || m)}</td><td class="num">${x.ventas}</td><td class="num">${money(r2(x.total))}</td>`;
+    payBody.appendChild(tr);
+  });
+  if (metodos.length) {
+    const tr = document.createElement("tr"); tr.className = "row-total";
+    tr.innerHTML = `<td><strong>Total</strong></td><td class="num"><strong>${totals.ventas}</strong></td><td class="num"><strong>${money(r2(totals.ingresos))}</strong></td>`;
+    payBody.appendChild(tr);
+  }
+  const notas = [];
+  if (descuentos > 0) notas.push(`Descuentos por canje de puntos: ${money(r2(descuentos))} (ya restados de los totales).`);
+  notas.push(anulaciones
+    ? `Pedidos anulados: ${anulaciones} (${fmtWeightShort(anuladoG)} pesados). El detalle está en Control de pesos.`
+    : "Pedidos anulados: ninguno.");
+  $("closing-pay-note").textContent = notas.join(" ");
+
   // Tabla de toppings: si es consolidado, se juntan las tiendas y se recalcula el %.
   const agg = {};
   results.forEach((c) => (c.toppings || []).forEach((t) => {
@@ -1821,6 +1856,11 @@ function closingReportText() {
     L.push(`  Peso de helado vendido: ${fmtWeight(c.peso_helado_g)}`);
     L.push(`  Peso de toppings vendido: ${fmtWeight(c.peso_toppings_g)}`);
     L.push(`  Ingresos: ${c.ingresos}`);
+    L.push("  Por forma de pago:");
+    if (!(c.por_pago || []).length) L.push("    (sin ventas)");
+    else c.por_pago.forEach((p) => L.push(`    - ${PAGO_LABELS[p.metodo] || p.metodo}: ${p.total} (${p.ventas} venta${p.ventas === 1 ? "" : "s"})`));
+    if (Number(c.descuentos) > 0) L.push(`  Descuentos por puntos: ${c.descuentos}`);
+    L.push(`  Pedidos anulados: ${c.anulaciones || 0}${Number(c.anulado_g) > 0 ? ` (${fmtWeightShort(c.anulado_g)})` : ""}`);
     L.push("  Toppings vendidos:");
     if (!(c.toppings || []).length) L.push("    (sin ventas de toppings)");
     else (c.toppings || []).forEach((t) => L.push(`    - ${t.name}: ${fmtWeightShort(t.peso_g)} (${t.pct}%)`));
@@ -1854,6 +1894,7 @@ function fillConfigForm() {
   $("cfg-currency").value = c.currency_code || "";
   $("cfg-taxid-label").textContent = TAX_LABELS[c.country_code] || "NIT";
   $("cfg-taxid").value = c.tax_id_value || "";
+  $("cfg-purchase-series").value = c.purchase_series || "";
   $("cfg-address").value = c.address || "";
   $("cfg-price-gram").value = c.price_per_gram;
   $("cfg-price-oz-hint").textContent = `≈ ${r2(Number(c.price_per_gram) * OZ_TO_G)} por onza`;
@@ -1991,6 +2032,7 @@ $("btn-save-config").addEventListener("click", async () => {
     name: $("cfg-name").value, legal_name: $("cfg-legal-name").value,
     country_code: $("cfg-country").value, currency_code: $("cfg-currency").value,
     tax_id_value: $("cfg-taxid").value, address: $("cfg-address").value,
+    purchase_series: $("cfg-purchase-series").value.trim().toUpperCase() || null,
     price_per_gram: parseFloat($("cfg-price-gram").value) || 0,
     include_cup_weight_in_price: $("cfg-include-cup").checked,
     margin_target_pct: parseFloat($("cfg-margin-target").value) || 0,
@@ -3020,7 +3062,7 @@ function renderDashProjection(serie, t) {
    la pestaña) y aunque llegara, sus consultas volverían vacías. */
 const AUDIT_TABLAS = {
   locations: "Sucursal", profiles: "Personal", flavors: "Sabor",
-  toppings: "Topping", supplies: "Insumo", expenses: "Gasto", sales: "Venta",
+  toppings: "Topping", supplies: "Insumo", expenses: "Gasto", sales: "Venta", purchases: "Compra",
 };
 const AUDIT_ACCIONES = { INSERT: "Creó", UPDATE: "Cambió", DELETE: "Borró" };
 // Campos que valen la pena en un resumen. El resto (fechas internas, ids)
@@ -3036,6 +3078,8 @@ const AUDIT_CAMPOS = {
   total_price: "total", description: "descripción", report_email: "correo",
   include_cup_weight_in_price: "cobra el vaso", legal_name: "razón social",
   tax_id_value: "identificación fiscal", address: "dirección", spent_on: "fecha",
+  purchase_series: "serie de compras", supplier_name: "proveedor", supplier_invoice_no: "factura",
+  exento: "exento", gravado15: "gravado 15%", gravado18: "gravado 18%", isv15: "ISV 15%", isv18: "ISV 18%", received_on: "entrada",
 };
 
 // Resume un evento en una frase legible: "costo/g: 0.06 → 0.02".
@@ -3044,14 +3088,16 @@ function auditResumen(ev) {
   if (ev.action === "DELETE") {
     // Una venta se identifica por su folio, no por un nombre entre comillas.
     const etiqueta = antes.folio != null ? `venta #${antes.folio}`
-                   : (antes.name || antes.description || antes.full_name);
+                   : (antes.name || antes.supplier_name || antes.description || antes.full_name);
     const monto = antes.total_price != null ? ` por ${dmoney(antes.total_price)}`
+                : antes.supplier_name && antes.total != null ? ` por ${dmoney(antes.total)}`
                 : antes.amount != null ? ` por ${dmoney(antes.amount)}` : "";
     return (etiqueta ? (antes.folio != null ? etiqueta : `"${etiqueta}"`) : "registro") + monto;
   }
   if (ev.action === "INSERT") {
-    const etiqueta = despues.name || despues.description || despues.full_name || "";
-    const monto = despues.amount != null ? ` por ${dmoney(despues.amount)}` : "";
+    const etiqueta = despues.name || despues.supplier_name || despues.description || despues.full_name || "";
+    const monto = despues.amount != null ? ` por ${dmoney(despues.amount)}`
+                : despues.supplier_name && despues.total != null ? ` por ${dmoney(despues.total)}` : "";
     return (etiqueta ? `"${etiqueta}"` : "registro nuevo") + monto;
   }
   const partes = [];
@@ -3581,6 +3627,225 @@ $("btn-ng-add").addEventListener("click", async () => {
   await cargarGastos();
   if (DASH.loaded) await loadDashboard();
   setTimeout(() => (msg.textContent = ""), 2500);
+});
+
+/* ===========================================================================
+   LIBRO DE COMPRAS
+   ---------------------------------------------------------------------------
+   Las facturas de proveedores, con las series del negocio (CTG, CTH y la de
+   cada tienda), para sacar el libro de compras igual que en ICG Manager.
+
+   La base manda (sql/12): la gerente ve y registra solo las de SU tienda; la
+   propietaria, todas, incluidas las de oficina/bodega central (sin tienda).
+   La cajera no llega aquí. Quién registró cada compra lo pone el servidor.
+   =========================================================================== */
+const CMP = { rows: [], loaded: false };
+const CMP_CENTRAL = "__central__";
+
+function serieCompra(c) {
+  if (c.compra === "gasto") return "CTG";
+  if (c.compra === "materia_bodega") return "CTH";
+  const loc = STATE.locations.find((l) => l.id === c.location_id);
+  return (loc && loc.purchase_series) || "SIN SERIE";
+}
+function cmoney(v) {
+  const loc = STATE.locations.find((l) => l.id === STATE.activeLocationId) || STATE.locations[0];
+  return `${(loc && loc.currency_code) || ""} ${(Number(v) || 0).toLocaleString("es-HN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function prepararCompras() {
+  const opciones = (conCentral, conTodas) => {
+    if (!isOwner()) {
+      const loc = activeLocation();
+      return `<option value="${esc(STATE.profile.location_id)}">${esc(loc ? loc.name : "Mi tienda")}</option>`;
+    }
+    return (conTodas ? '<option value="__all__">Todas</option>' : "") +
+      STATE.locations.filter((l) => l.active).map((l) => `<option value="${esc(l.id)}">${esc(l.name)}</option>`).join("") +
+      (conCentral ? `<option value="${CMP_CENTRAL}">Oficina / bodega central</option>` : "");
+  };
+  ["cmp-location", "nc-location"].forEach((id) => {
+    const sel = $(id), keep = sel.value;
+    sel.innerHTML = opciones(true, id === "cmp-location");
+    if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
+    sel.disabled = !isOwner();
+  });
+  if (!$("cmp-from").value) {
+    const hoy = new Date();
+    $("cmp-from").value = localDateStr(startOfMonth(hoy));
+    $("cmp-to").value = localDateStr(hoy);
+  }
+  if (!$("nc-received").value) $("nc-received").value = localDateStr();
+  if (!$("nc-invoice-date").value) $("nc-invoice-date").value = localDateStr();
+  ajustarTipoCompra();
+}
+
+// La materia prima "de la tienda" tiene que ser de una tienda: si se elige
+// oficina/bodega central, no se ofrece.
+function ajustarTipoCompra() {
+  const central = $("nc-location").value === CMP_CENTRAL;
+  const opt = $("nc-tipo").querySelector('option[value="materia_tienda"]');
+  opt.disabled = central;
+  if (central && $("nc-tipo").value === "materia_tienda") $("nc-tipo").value = "materia_bodega";
+  const loc = STATE.locations.find((l) => l.id === $("nc-location").value);
+  opt.textContent = `Materia prima comprada por la tienda${loc && loc.purchase_series ? ` (${loc.purchase_series})` : ""}`;
+}
+$("nc-location").addEventListener("change", ajustarTipoCompra);
+
+// El ISV se propone solo mientras nadie lo haya tocado a mano.
+["15", "18"].forEach((t) => {
+  const g = $("nc-g" + t), i = $("nc-isv" + t);
+  g.addEventListener("input", () => {
+    if (i.dataset.mano === "1") return;
+    const v = parseFloat(g.value);
+    i.value = v > 0 ? (Math.round(v * Number(t)) / 100).toFixed(2) : "";
+    totalCompra();
+  });
+  i.addEventListener("input", () => { i.dataset.mano = "1"; totalCompra(); });
+});
+["nc-exento", "nc-desc-monto"].forEach((id) => $(id).addEventListener("input", totalCompra));
+function montoCompra(id) { const v = parseFloat($(id).value); return v > 0 ? Math.round(v * 100) / 100 : 0; }
+function totalCompra() {
+  const t = ["nc-exento", "nc-g15", "nc-g18", "nc-isv15", "nc-isv18"].reduce((a, id) => a + montoCompra(id), 0);
+  $("nc-total").textContent = t > 0 ? `Total: ${cmoney(t)}` : "";
+  return Math.round(t * 100) / 100;
+}
+
+["cmp-location", "cmp-from", "cmp-to"].forEach((id) => $(id).addEventListener("change", cargarCompras));
+$("btn-cmp-refresh").addEventListener("click", cargarCompras);
+
+async function comprasDelRango() {
+  const todas = [];
+  const loc = $("cmp-location").value;
+  for (let pag = 0; ; pag++) {
+    let q = sb.from("purchases").select("*")
+      .gte("received_on", $("cmp-from").value).lte("received_on", $("cmp-to").value)
+      .order("received_on", { ascending: false }).order("numero", { ascending: false })
+      .range(pag * 1000, pag * 1000 + 999);
+    if (loc === CMP_CENTRAL) q = q.is("location_id", null);
+    else if (loc !== "__all__") q = q.eq("location_id", loc);
+    const { data, error } = await q;
+    if (error) throw error;
+    todas.push(...(data || []));
+    if (!data || data.length < 1000) return todas;
+  }
+}
+
+async function cargarCompras() {
+  if (!canManage()) return;
+  const avisos = $("cmp-warnings");
+  if (!navigator.onLine) { avisos.innerHTML = '<div class="alert warn">Sin conexión: las compras necesitan internet.</div>'; return; }
+  if ($("cmp-from").value > $("cmp-to").value) { avisos.innerHTML = '<div class="alert bad">La fecha "desde" es posterior a la fecha "hasta".</div>'; return; }
+  try {
+    CMP.rows = await comprasDelRango();
+  } catch (e) {
+    console.error(e);
+    avisos.innerHTML = '<div class="alert bad">No se pudieron cargar las compras. Si sigue pasando, avísale a soporte técnico.</div>';
+    return;
+  }
+  CMP.loaded = true;
+  const sinSerie = CMP.rows.some((c) => c.compra === "materia_tienda" && serieCompra(c) === "SIN SERIE");
+  avisos.innerHTML = sinSerie
+    ? '<div class="alert warn">Hay compras de una tienda que todavía no tiene serie de compras (por ejemplo 011C). Ponla en Configuración para que el libro salga con su serie.</div>'
+    : "";
+  renderCompras();
+}
+
+function renderCompras() {
+  const suma = (k) => CMP.rows.reduce((a, c) => a + Number(c[k] || 0), 0);
+  const porSerie = {};
+  CMP.rows.forEach((c) => { const k = serieCompra(c); porSerie[k] = (porSerie[k] || 0) + Number(c.total || 0); });
+  const kpi = (l, v, sub) => `<div class="kpi"><div class="kpi-label">${esc(l)}</div><div class="kpi-value num">${v}</div>${sub ? `<div class="kpi-sub">${sub}</div>` : ""}</div>`;
+  $("cmp-kpis").innerHTML =
+    kpi("Total del periodo", cmoney(suma("total")), `${CMP.rows.length} factura(s)`) +
+    kpi("ISV pagado", cmoney(suma("isv15") + suma("isv18")), "crédito fiscal") +
+    Object.entries(porSerie).sort((a, b) => b[1] - a[1]).map(([k, v]) => kpi(`Serie ${k}`, cmoney(v))).join("");
+
+  const body = document.querySelector("#table-compras tbody");
+  body.innerHTML = CMP.rows.length ? "" : '<tr><td colspan="9" class="hint">No hay compras registradas en estas fechas.</td></tr>';
+  const fmt = (iso) => { const [y, m, d] = String(iso).split("-"); return `${d}/${m}/${y}`; };
+  CMP.rows.forEach((c) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${esc(fmt(c.received_on))}</td><td>${esc(serieCompra(c))}</td>
+      <td>${esc(c.supplier_name)}${c.description ? `<div class="hint">${esc(c.description)}</div>` : ""}</td>
+      <td>${esc(c.supplier_invoice_no || "—")}</td>
+      <td class="num">${cmoney(c.exento)}</td><td class="num">${cmoney(Number(c.gravado15) + Number(c.gravado18))}</td>
+      <td class="num">${cmoney(Number(c.isv15) + Number(c.isv18))}</td><td class="num">${cmoney(c.total)}</td>
+      <td><div class="row-actions"><button class="icon-btn delete btn-del" type="button" title="Eliminar">${ICON_TRASH}</button></div></td>`;
+    tr.querySelector(".btn-del").addEventListener("click", async () => {
+      if (!confirm(`¿Eliminar la factura ${c.supplier_invoice_no || ""} de ${c.supplier_name}? Queda registrado en el rastro de cambios.`)) return;
+      const { error } = await sb.from("purchases").delete().eq("id", c.id);
+      if (error) { alert("No se pudo eliminar. Si sigue pasando, avísale a soporte técnico."); return; }
+      await cargarCompras();
+    });
+    body.appendChild(tr);
+  });
+}
+
+$("btn-nc-add").addEventListener("click", async () => {
+  const msg = (t, ok) => { $("nc-msg").innerHTML = t ? `<div class="alert ${ok ? "ok" : "warn"}">${esc(t)}</div>` : ""; };
+  const proveedor = $("nc-supplier").value.trim();
+  const rtn = $("nc-rtn").value.replace(/\D/g, "");
+  const destino = $("nc-location").value;
+  const tipo = $("nc-tipo").value;
+  if (!proveedor) { msg("Escribe el nombre del proveedor."); return; }
+  if (rtn && rtn.length !== 14) { msg("El RTN lleva 14 dígitos."); return; }
+  if (!(totalCompra() > 0)) { msg("Pon el importe de la factura."); return; }
+  if (tipo === "materia_tienda" && destino === CMP_CENTRAL) { msg("La materia prima comprada por una tienda tiene que ser de una tienda."); return; }
+  if (!navigator.onLine) { msg("Sin conexión: registrar una compra necesita internet."); return; }
+  const btn = $("btn-nc-add"); btn.disabled = true;
+  // created_by NO se manda: lo pone el servidor con quien está dentro.
+  const { error } = await sb.from("purchases").insert({
+    location_id: destino === CMP_CENTRAL ? null : destino,
+    compra: tipo,
+    received_on: $("nc-received").value || localDateStr(),
+    invoice_date: $("nc-invoice-date").value || $("nc-received").value || localDateStr(),
+    supplier_name: proveedor,
+    supplier_rtn: rtn || null,
+    supplier_code: $("nc-code").value.trim() || null,
+    supplier_invoice_no: $("nc-invoice").value.trim() || null,
+    supplier_cai: $("nc-cai").value.trim() || null,
+    description: $("nc-desc").value.trim() || null,
+    exento: montoCompra("nc-exento"), gravado15: montoCompra("nc-g15"), gravado18: montoCompra("nc-g18"),
+    isv15: montoCompra("nc-isv15"), isv18: montoCompra("nc-isv18"), descuento: montoCompra("nc-desc-monto"),
+  });
+  btn.disabled = false;
+  if (error) {
+    msg(/uq_purchases_factura|duplicate/i.test(error.message || "")
+      ? "Esa factura de ese proveedor ya está registrada."
+      : "No se pudo registrar la compra. Revisa los datos; si sigue pasando, avísale a soporte técnico.");
+    return;
+  }
+  msg("Compra registrada.", true);
+  ["nc-supplier", "nc-rtn", "nc-code", "nc-invoice", "nc-cai", "nc-desc", "nc-exento", "nc-g15", "nc-g18", "nc-isv15", "nc-isv18", "nc-desc-monto"]
+    .forEach((id) => { $(id).value = ""; delete $(id).dataset.mano; });
+  totalCompra();
+  await cargarCompras();
+  setTimeout(() => msg(""), 2500);
+});
+
+$("btn-cmp-download").addEventListener("click", async () => {
+  const avisos = $("cmp-warnings");
+  if (!navigator.onLine) { avisos.innerHTML = '<div class="alert warn">Para sacar el libro hace falta conexión a internet.</div>'; return; }
+  const btn = $("btn-cmp-download"); btn.disabled = true;
+  try {
+    const compras = await comprasDelRango();
+    const loc = $("cmp-location");
+    const quien = loc.options[loc.selectedIndex] ? loc.options[loc.selectedIndex].textContent : "";
+    const fmt = (iso) => { const [y, m, d] = iso.split("-"); return `${d}/${m}/${y}`; };
+    const h = LibroVentas.hojaCompras({
+      titulo: `LIBRO DE COMPRAS — ${quien} — del ${fmt($("cmp-from").value)} al ${fmt($("cmp-to").value)}`,
+      compras, serie: serieCompra,
+    });
+    const bytes = LibroVentas.crearXlsx([{ nombre: "Libro de compras", ...h }]);
+    const nombre = `libro-compras_${quien}_${$("cmp-from").value}_${$("cmp-to").value}.xlsx`.replace(/[^\w.-]+/g, "-");
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    const a = document.createElement("a"); a.href = url; a.download = nombre;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  } catch (e) {
+    console.error(e);
+    avisos.innerHTML = '<div class="alert bad">No se pudo sacar el libro de compras. Si sigue pasando, avísale a soporte técnico.</div>';
+  } finally { btn.disabled = false; }
 });
 
 /* ===========================================================================

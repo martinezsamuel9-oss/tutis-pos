@@ -19,11 +19,19 @@
    es ese mismo problema más ruido.
    =========================================================================== */
 
+import { respaldar } from "./respaldo.js";
+
 const OZ_POR_GRAMO = 1 / 28.349523125;
 
 export default {
+  // Cada noche: primero el cierre, después el respaldo. Van por separado a
+  // propósito: si el respaldo falla, el correo ya salió, y al revés.
   async scheduled(evento, env, ctx) {
-    ctx.waitUntil(enviarCierre(env, new Date(evento.scheduledTime)));
+    const ahora = new Date(evento.scheduledTime);
+    ctx.waitUntil((async () => {
+      await enviarCierre(env, ahora).catch((e) => console.error(`Cierre: ${e.message}`));
+      await respaldar(env, diaLocal(ahora, Number(env.UTC_OFFSET_HOURS ?? -6)));
+    })());
   },
 
   // Sin dirección pública: este Worker solo existe para el reloj. Se deja
@@ -31,12 +39,15 @@ export default {
   // poder pedir el cierre de un día a mano cuando haga falta.
   async fetch(peticion, env) {
     const url = new URL(peticion.url);
-    if (url.pathname !== "/enviar" || !env.TOKEN_MANUAL) {
+    if (!["/enviar", "/respaldar"].includes(url.pathname) || !env.TOKEN_MANUAL) {
       return new Response("No encontrado", { status: 404 });
     }
     const dado = peticion.headers.get("x-token") || "";
     if (!comparaSegura(dado, env.TOKEN_MANUAL)) {
       return new Response("No autorizado", { status: 401 });
+    }
+    if (url.pathname === "/respaldar") {
+      return Response.json(await respaldar(env, diaLocal(new Date(), Number(env.UTC_OFFSET_HOURS ?? -6))));
     }
     const dia = url.searchParams.get("dia");   // opcional: 2026-09-19
     const resultado = await enviarCierre(env, new Date(), dia);
@@ -231,6 +242,8 @@ function envoltura(titulo, cuerpo) {
   </div></body></html>`;
 }
 
+const PAGOS = { efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia", sin_dato: "Sin dato (ventas antiguas)" };
+
 function bloqueTienda(c) {
   const u = c.weight_unit === "oz" ? "oz" : "g";
   const moneda = c.currency_code;
@@ -254,11 +267,29 @@ function bloqueTienda(c) {
         `<tr><td ${TD}>${esc(t.name)}</td><td ${TDN}>${esc(peso(t.peso_g, u))}</td><td ${TDN}>${esc(n2(t.pct))}%</td></tr>`).join("")
     : `<tr><td ${TD} colspan="3" style="padding:7px 10px;color:#56717A">No se vendieron toppings ese día.</td></tr>`;
 
+  // Cuadre por forma de pago: lo que tiene que haber en caja, en el
+  // datáfono y en transferencias. Lo calcula la base (sql/12).
+  const pagos = (c.por_pago || []).length
+    ? c.por_pago.map((p) =>
+        `<tr><td ${TD}>${esc(PAGOS[p.metodo] || p.metodo)}</td><td ${TDN}>${esc(String(p.ventas))}</td><td ${TDN}><strong>${esc(dinero(moneda, p.total))}</strong></td></tr>`).join("")
+    : `<tr><td ${TD} colspan="3" style="padding:7px 10px;color:#56717A">No hubo ventas ese día.</td></tr>`;
+  const notas = [];
+  if (Number(c.descuentos) > 0) notas.push(`Descuentos por canje de puntos: ${dinero(moneda, c.descuentos)} (ya restados).`);
+  notas.push(Number(c.anulaciones) > 0
+    ? `Pedidos anulados: ${c.anulaciones} (${peso(c.anulado_g, u)} pesados).`
+    : "Pedidos anulados: ninguno.");
+
   return `
   <table ${CSS_TABLA}>${filas}
     <tr><td ${TD}><strong>Utilidad del día</strong></td>
         <td ${TDN}><strong style="color:${colorUtil};font-size:16px">${esc(dinero(moneda, util))}</strong></td></tr>
   </table>
+  <h3 style="margin:22px 0 6px;font-size:14px;font-family:Arial,Helvetica,sans-serif">Por forma de pago</h3>
+  <table ${CSS_TABLA}>
+    <tr><th ${TH}>Forma de pago</th><th ${THN}>Ventas</th><th ${THN}>Total</th></tr>
+    ${pagos}
+  </table>
+  <p style="margin:6px 0 0;color:#56717A;font-size:12px;font-family:Arial,Helvetica,sans-serif">${esc(notas.join(" "))}</p>
   <h3 style="margin:22px 0 6px;font-size:14px;font-family:Arial,Helvetica,sans-serif">Toppings vendidos</h3>
   <table ${CSS_TABLA}>
     <tr><th ${TH}>Topping</th><th ${THN}>Peso</th><th ${THN}>% del total</th></tr>

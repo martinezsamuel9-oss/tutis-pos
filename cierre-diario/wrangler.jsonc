@@ -49,5 +49,11 @@
     "CORREO_PROPIETARIO": ""
   },
 
+  // Dónde queda el respaldo nocturno de la base (src/respaldo.js). Es un
+  // bucket de R2 privado: no tiene dirección pública.
+  "r2_buckets": [
+    { "binding": "RESPALDOS", "bucket_name": "tutis-respaldos" }
+  ],
+
   "observability": { "enabled": true }
 }

@@ -65,12 +65,14 @@ sql/09_wallet_avisos.sql    avisos a Wallet cuando cambia un saldo (pg_net)
 sql/10_peso_fijo.sql        el peso lo pone la báscula: PIN de gerente, autorizaciones,
                             clasificación de cada venta y pedidos anulados
 sql/11_huella.sql           autorizar con la huella del teléfono de la gerente (passkeys)
-cierre-diario/      Worker programado que manda el cierre (ver su LEEME.md)
+sql/12_compras_y_cierre.sql libro de compras (purchases), cierre por forma de pago y funciones de respaldo
+cierre-diario/      Worker programado: manda el cierre y respalda la base en R2 (ver su LEEME.md)
 wallet/             Worker de pases de Apple/Google Wallet en wallet.slabblu.com (ver su LEEME.md)
 wallet/secretos/    llave y certificado de Apple — GITIGNORADO, nunca al repo
 sql/pruebas/        prueba_aislamiento.sql (13) + prueba_seguridad.sql (48 ataques)
                     + prueba_fidelizacion.sql (19) + prueba_pesos.sql (48)
-                    + prueba_huella.sql (12)
+                    + prueba_huella.sql (12) + prueba_compras.sql (28)
+                    + borrar_datos_de_prueba.sql (quita las demostraciones)
                     + datos_de_demostracion.sql (14 días de ventas, borrables)
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
 web/app.js          toda la lógica (17 secciones numeradas)
@@ -504,6 +506,39 @@ contador. Lo que no hay que deshacer:
 4. **El .xlsx se arma a mano** (ZIP sin comprimir + XML): la CSP no permite
    librerías. Todo en Arial.
 
+### 5.3 Libro de compras
+
+Pestaña *Compras* (gerente y propietaria). Cada factura de proveedor con las
+series del negocio: CTG gasto, CTH materia prima de bodega, y la serie de cada
+tienda (`locations.purchase_series`, se pone en Configuración) para lo que la
+tienda compra directo. Descarga el Excel con las 20 columnas del libro de
+compras de ICG Manager; con las 142 facturas de agosto cuadra al centavo.
+
+1. **La serie de la tienda vive en `locations`, no en cada compra**: si el
+   código cambia, no quedan compras con dos series.
+2. **`location_id` null = oficina/bodega central**, y eso solo lo ve y lo
+   registra la propietaria (`can_manage_location(null)` solo es verdadero
+   para ella). La cajera no ve compras.
+3. **`created_by` lo pone el disparador**, también al editar; el total es
+   columna calculada. La misma factura del mismo proveedor no entra dos veces.
+4. **Las compras no tocan el inventario ni el tablero.** Los gastos de
+   operación para la utilidad se siguen registrando en Gastos.
+
+### 5.4 Cierre por forma de pago
+
+`daily_closing_core` devuelve además `por_pago` (efectivo, tarjeta,
+transferencia; las ventas antiguas sin el dato salen como `sin_dato`),
+`descuentos` (canje de puntos) y `anulaciones`/`anulado_g`. Lo muestran
+Reportes, el texto del correo manual y el correo automático.
+
+### 5.5 Respaldo
+
+Cada noche, después del cierre, `cierre-diario` copia todas las tablas a R2
+(`tutis-respaldos`). Detalle y cómo restaurar: `cierre-diario/LEEME.md`. Lo que
+no hay que deshacer: no comprime ni lee los datos (10 ms de CPU del plan
+gratuito), el manifiesto se escribe al final, y de los usuarios va solo el
+correo, nunca hashes.
+
 ## 6. Cómo probar los cambios
 
 Todo lo entregado fue verificado antes de entregarse. Si tocas el esquema o las
@@ -529,11 +564,13 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/08_fidelizacion.sql
 grep -v "create extension if not exists pg_net" sql/09_wallet_avisos.sql | psql -h /tmp/pg -p 5433 -U postgres
 psql -h /tmp/pg -p 5433 -U postgres -f sql/10_peso_fijo.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/11_huella.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/12_compras_y_cierre.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_aislamiento.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_seguridad.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_fidelizacion.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_pesos.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_huella.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_compras.sql
 ```
 
 `00_simulacion_supabase.sql` recrea lo que Supabase ya trae (schema `auth`,
@@ -570,8 +607,8 @@ punta a punta: pesar, línea fija, anular, recargar, PIN, sin internet, reporte
    premium a tarifa fija y Bubble Pop por onza; el modelo de precio único por
    gramo no es el suyo. Pendiente de la lista de precios vigente.
 3. **Conectar el proveedor de facturación** cuando exista el registro fiscal.
-4. **Respaldos**: el plan gratuito tiene retención limitada. Si el negocio
-   crece, conviene subir de plan o exportar ventas periódicamente.
+4. **Respaldos**: ya hay respaldo nocturno a R2 (5.5). Si el negocio crece,
+   igual conviene subir de plan de Supabase por la recuperación a un punto en el tiempo.
 
 ## 8. Historial: qué se descartó y por qué
 

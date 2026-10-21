@@ -1,6 +1,7 @@
 /* ===========================================================================
-   TUTI'S — Libro de ventas en el formato del "Reporte fiscal de ventas" de ICG
+   TUTI'S — Libros de ventas y de compras en el formato de ICG
    ---------------------------------------------------------------------------
+   VENTAS:
    Es el Excel que el contador recibe hoy de FrontRetail (rptVentasFRetail):
    mismas columnas, mismo orden y fila de TOTALES al final, para que lo pueda
    trabajar igual.
@@ -16,6 +17,10 @@
    gravado + ISV da exactamente lo cobrado, factura por factura. El
    descuento (canje de puntos) va aparte, como en ICG, donde el gravado ya
    viene con el descuento restado.
+
+   COMPRAS: el "Libro de compras" de ICG Manager, mismas 20 columnas. La
+   serie de cada compra (CTG gasto, CTH materia prima de bodega, o la serie de
+   la tienda como 011C) la decide quien llama, con su configuración.
 
    El .xlsx se arma a mano (ZIP sin compresión + XML). No puede haber
    librería: la CSP de la caja es script-src 'self'. Se prueba en Node
@@ -92,6 +97,40 @@
     return { matriz: m, filas, totales: t };
   }
 
+  /* --- Libro de compras ------------------------------------------------------ */
+  // compras: filas de `purchases`. serie(c): la serie del albarán de esa compra
+  // (CTG, CTH, 011C…). Orden como el de ICG: por proveedor y luego por fecha.
+  const SERIE_FACTURA = { gasto: "CTG", materia_bodega: "CTH", materia_tienda: "CTH" };
+  function hojaCompras({ titulo, compras, serie }) {
+    const filas = compras.slice().sort((a, b) =>
+      String(a.supplier_name || "").localeCompare(String(b.supplier_name || ""), "es", { sensitivity: "base" })
+      || String(a.received_on).localeCompare(String(b.received_on)) || (a.numero || 0) - (b.numero || 0));
+    const n = (v) => cent(v || 0);
+    const t = { exento: 0, g15: 0, g18: 0, base: 0, desc: 0, i15: 0, i18: 0, imp: 0, total: 0 };
+    const m = [
+      [titulo],
+      ["Fecha albarán", "Serie Albarán", "Fecha Factura", "Serie Factura", "No.Factura Sistema", "No.Factura Proveedor",
+        "CAI", "Cod. Proveedor", "RTN", "Nombre Proveedor", "Facturado", "Importe exento", "Importe Gravado 15%",
+        "Importe Gravado 18%", "Base Imponible", "Descuentos", "Impuesto 15%", "Impuesto 18%", "Total Impuestos", "Importe Total"],
+    ];
+    filas.forEach((c) => {
+      const base = n(n(c.exento) + n(c.gravado15) + n(c.gravado18));
+      const imp = n(n(c.isv15) + n(c.isv18));
+      const total = n(base + imp);
+      t.exento += n(c.exento); t.g15 += n(c.gravado15); t.g18 += n(c.gravado18); t.base += base;
+      t.desc += n(c.descuento); t.i15 += n(c.isv15); t.i18 += n(c.isv18); t.imp += imp; t.total += total;
+      m.push([{ fecha: c.received_on }, serie(c), { fecha: c.invoice_date || c.received_on }, SERIE_FACTURA[c.compra] || "CTH",
+        c.numero == null ? "" : String(c.numero), c.supplier_invoice_no || "", c.supplier_cai || "", c.supplier_code || "",
+        c.supplier_rtn || "", c.supplier_name || "", "T", n(c.exento), n(c.gravado15), n(c.gravado18), base, n(c.descuento),
+        n(c.isv15), n(c.isv18), imp, total]);
+    });
+    Object.keys(t).forEach((k) => { t[k] = cent(t[k]); });
+    m.push(["TOTALES", null, null, null, null, null, null, null, null, `${filas.length} factura(s)`, null,
+      t.exento, t.g15, t.g18, t.base, t.desc, t.i15, t.i18, t.imp, t.total]);
+    return { matriz: m, totales: t, encabezado: 2, titulo: 1, etiquetas: false,
+             anchos: [12, 10, 12, 10, 12, 22, 40, 10, 16, 34, 9, 14, 14, 14, 14, 12, 13, 12, 13, 14] };
+  }
+
   /* --- XLSX a mano ------------------------------------------------------------ */
   const CRC = (() => {
     const t = new Uint32Array(256);
@@ -158,28 +197,30 @@
 <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
 </styleSheet>`;
 
-  function hojaXml(matriz, filaEncabezado) {
+  // h: { matriz, encabezado (fila 1-based), titulo (fila 1-based), etiquetas (bool), anchos }
+  function hojaXml(h) {
+    const { matriz, encabezado, titulo } = h;
     const filas = matriz.map((fila, r) => {
-      const negrita = r + 1 === filaEncabezado || r === matriz.length - 1;
+      const negrita = r + 1 === encabezado || r === matriz.length - 1;
       const celdas = fila.map((v, c) => {
         if (v == null || v === "") return "";
         const ref = colLetra(c) + (r + 1);
         if (typeof v === "number") return `<c r="${ref}" s="${negrita ? 4 : 3}"><v>${v}</v></c>`;
         if (v && v.fecha) return `<c r="${ref}" s="2"><v>${serialExcel(v.fecha)}</v></c>`;
-        const s = r === 1 ? 5 : negrita || (c === 1 && r < filaEncabezado - 1) ? 1 : 0;
+        const s = r + 1 === titulo ? 5 : negrita || (h.etiquetas && c === 1 && r + 1 < encabezado - 1) ? 1 : 0;
         return `<c r="${ref}" t="inlineStr" s="${s}"><is><t xml:space="preserve">${xml(v)}</t></is></c>`;
       }).join("");
       return celdas ? `<row r="${r + 1}">${celdas}</row>` : "";
     }).join("");
-    const anchos = [3, 12, 16, 34, 22, 14, 20, 14, 14, 16, 16, 14, 16, 14, 12, 14, 14]
-      .map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join("");
+    const anchos = h.anchos.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join("");
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-<sheetViews><sheetView workbookViewId="0"><pane ySplit="${filaEncabezado}" topLeftCell="A${filaEncabezado + 1}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
+<sheetViews><sheetView workbookViewId="0"><pane ySplit="${encabezado}" topLeftCell="A${encabezado + 1}" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>
 <cols>${anchos}</cols><sheetData>${filas}</sheetData></worksheet>`;
   }
 
-  // hojas: [{ nombre, matriz }]. Devuelve los bytes del .xlsx.
+  // hojas: [{ nombre, matriz, encabezado?, titulo?, anchos? }]. Sin las
+  // opcionales, la hoja sale con la forma del libro de ventas. Devuelve los bytes.
   function crearXlsx(hojas) {
     const enc = new TextEncoder(), usados = new Set();
     const nombres = hojas.map((h) => nombreHoja(h.nombre, usados));
@@ -194,11 +235,13 @@
       f("xl/_rels/workbook.xml.rels", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${hojas.map((_, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`).join("")}<Relationship Id="rId${hojas.length + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`),
       f("xl/styles.xml", ESTILOS),
-      ...hojas.map((h, i) => f(`xl/worksheets/sheet${i + 1}.xml`, hojaXml(h.matriz, 7))),
+      ...hojas.map((h, i) => f(`xl/worksheets/sheet${i + 1}.xml`, hojaXml({
+        encabezado: 7, titulo: 2, etiquetas: true,
+        anchos: [3, 12, 16, 34, 22, 14, 20, 14, 14, 16, 16, 14, 16, 14, 12, 14, 14], ...h }))),
     ]);
   }
 
-  const api = { TASA, filasLibro, totales, hojaLibro, crearXlsx, crc32 };
+  const api = { TASA, filasLibro, totales, hojaLibro, hojaCompras, crearXlsx, crc32 };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else global.LibroVentas = api;
 })(typeof window !== "undefined" ? window : globalThis);

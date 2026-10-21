@@ -284,6 +284,32 @@ const texto = (page, sel) => page.locator(sel).innerText();
   ok(descarga.suggestedFilename() === "libro-ventas_Tuti-s-Galer-as_2026-10-01_2026-10-31.xlsx", "26b el archivo se llama por tienda y fechas", descarga.suggestedFilename());
   ok(fs.statSync(destino).size > 1000 && fs.readFileSync(destino).subarray(0, 2).toString() === "PK", "26c es un .xlsx (zip)");
   ok(g.errores.length === 0, "26d sin errores de JavaScript (libro)", g.errores);
+
+  // Cierre por forma de pago
+  const pago = await texto(g.page, "#table-closing-pay");
+  ok(pago.includes("Efectivo") && pago.includes("170.50") && pago.includes("Tarjeta") && pago.includes("250.50"),
+     "27 el cierre cuadra por forma de pago, con su total", pago);
+  ok((await texto(g.page, "#closing-pay-note")).includes("Pedidos anulados: 1"), "27b y dice los descuentos y los pedidos anulados");
+
+  // Libro de compras
+  await g.page.click('.tab-btn[data-tab="compras"]');
+  ok(await g.page.isDisabled("#nc-location"), "28 la gerente solo registra compras de su tienda");
+  await g.page.fill("#nc-supplier", "Distribuidora <b>DCR</b>");
+  await g.page.fill("#nc-rtn", "0801-1");
+  await g.page.fill("#nc-g15", "100");
+  ok((await g.page.inputValue("#nc-isv15")) === "15.00", "28b el ISV se calcula solo con el gravado");
+  await g.page.click("#btn-nc-add");
+  ok((await texto(g.page, "#nc-msg")).includes("14 dígitos") && (await rpcs(g.page, "insert:purchases")).length === 0, "28c un RTN incompleto no se registra");
+  await g.page.fill("#nc-rtn", "08019013602834"); await g.page.fill("#nc-isv15", "14.99"); await g.page.fill("#nc-g15", "100.00");
+  ok((await g.page.inputValue("#nc-isv15")) === "14.99", "28d si se corrige el ISV a mano, ya no se pisa");
+  await g.page.fill("#nc-exento", "280"); await g.page.fill("#nc-invoice", "000-001-01-00020106");
+  await g.page.click("#btn-nc-add");
+  await g.page.waitForFunction(() => document.querySelector("#nc-msg").textContent.includes("registrada"));
+  const compra = (await rpcs(g.page, "insert:purchases")).pop().args;
+  ok(compra.compra === "materia_tienda" && compra.location_id === "L1" && compra.gravado15 === 100 && compra.isv15 === 14.99
+     && compra.exento === 280 && compra.supplier_rtn === "08019013602834" && !("created_by" in compra),
+     "28e la compra va completa y sin firmar a nombre de nadie (lo pone la base)", compra);
+  ok(g.errores.length === 0, "28f sin errores de JavaScript (compras)", g.errores);
   await g.ctx.close();
 }
 

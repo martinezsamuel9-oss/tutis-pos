@@ -13,7 +13,7 @@
       { id: "S2", location_id: "L1", name: "Cuchara", kind: "cuchara", tare_weight_g: 0, cost_per_unit: 0.38, stock_qty: 900, active: true },
     ],
     profiles: [{ id: "U1", role: rol, location_id: rol === "propietario" ? null : "L1", active: true, full_name: rol === "cajera" ? "Cajera Uno" : "Gerente Uno" }],
-    sales: JSON.parse(localStorage.getItem("fake_sales") || "[]"), loyalty_config: [], expenses: [], audit_log: [], customers: [], loyalty_transactions: [], sale_lines: [],
+    sales: JSON.parse(localStorage.getItem("fake_sales") || "[]"), loyalty_config: [], expenses: [], audit_log: [], customers: [], loyalty_transactions: [], sale_lines: [], purchases: [],
   };
   const log = JSON.parse(localStorage.getItem("fake_rpcs") || "[]");
   function anotar(name, args) { log.push({ name, args }); localStorage.setItem("fake_rpcs", JSON.stringify(log)); }
@@ -27,7 +27,7 @@
       ilike() { return q; }, or() { return q; }, neq() { return q; }, not() { return q; }, is() { return q; },
       eq(col, val) { rows = rows.filter((r) => r[col] === undefined || r[col] === val); return q; },
       single() { single = true; return q; }, maybeSingle() { single = true; return q; },
-      insert() { return q; }, update() { return q; }, delete() { return q; }, upsert() { return q; },
+      insert(o) { anotar("insert:" + table, o); return q; }, update() { return q; }, delete() { return q; }, upsert() { return q; },
       then(res, rej) { return Promise.resolve({ data: single ? (rows[0] || null) : rows, error: null }).then(res, rej); },
     };
     return q;
@@ -49,6 +49,8 @@
           ? { data: { ok: true, id: "AUTH-H", authorized_by_name: "Gerente Galerías" }, error: null }
           : { data: null, error: { message: "Para autorizar con huella hay que confirmarla en el teléfono en ese momento", code: "P0001" } };
       case "tengo_pin": return { data: false, error: null };
+      case "daily_closing": return { data: { ventas: 3, ingresos: 250.5, vasos: 3, cucharas: 3, peso_helado_g: 450, peso_toppings_g: 90, toppings: [],
+        por_pago: [{ metodo: "efectivo", ventas: 2, total: 170.5 }, { metodo: "tarjeta", ventas: 1, total: 80 }], descuentos: 10, anulaciones: 1, anulado_g: 185.5 }, error: null };
       case "set_manager_pin": return args.p_pin === "1234" ? { data: null, error: { message: "Ese PIN es demasiado fácil de adivinar. Elige otro." } } : { data: null, error: null };
       case "control_pesos": return { data: {
         por_cajera: [{ cajera: "Cajera Uno", ventas_pesadas: 10, bascula: 8, no_cuadra: 0, manual_autorizado: 1, manual_sin_autorizar: 1, sin_dato: 0, anulaciones: 2, gramos_anulados: 340 }],

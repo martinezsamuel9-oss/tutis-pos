@@ -137,3 +137,47 @@ Para reenviar a propósito, hay que borrar esa fila de `closing_email_log`.
 Si faltan secretos, el Worker **no truena**: lo anota y termina. Un cierre que
 no se manda ya es un problema; un Worker reventando cada noche es ese mismo
 problema más ruido.
+
+## Respaldo nocturno de la base
+
+El plan gratuito de Supabase no deja descargar respaldos. Por eso este mismo
+Worker, cada noche después de mandar el cierre, copia **todas las tablas** del
+sistema a un bucket privado de R2 (`tutis-respaldos`, binding `RESPALDOS`),
+fuera de Supabase. El código está en `src/respaldo.js`; las dos funciones que
+usa (`respaldo_conteo`, `respaldo_tabla`) están en `sql/12_compras_y_cierre.sql`
+y solo las puede llamar la llave del servidor.
+
+Cómo queda:
+
+```
+2026-10-21/sales-000.json        bloques de hasta 20 000 filas, en JSON
+2026-10-21/usuarios-000.json     solo id y correo: NUNCA hashes de contraseña
+2026-10-21/manifiesto.json       se escribe al final; sin él, ese respaldo quedó a medias
+```
+
+Se guardan los últimos 7 días, los domingos de las últimas 8 semanas y el día 1
+de cada mes para siempre. No se respaldan los PIN de las gerentes (son hashes;
+después de restaurar, cada una vuelve a poner el suyo) ni secretos.
+
+Cada respaldo pesa hoy unos cientos de KB. R2 regala 10 GB al mes; con el
+volumen de dos tiendas eso alcanza para años, pero conviene mirar el tamaño
+(`bytes` en el manifiesto) cada tanto.
+
+**Ver los respaldos:** Cloudflare → R2 → `tutis-respaldos`. O desde aquí:
+
+```bash
+npx wrangler r2 object get tutis-respaldos/2026-10-21/manifiesto.json --remote --pipe
+```
+
+**Pedir un respaldo a mano:** igual que el cierre a mano (ver arriba), pero a
+`/respaldar`.
+
+**Restaurar:** cada archivo es un arreglo JSON con las filas tal cual están en
+la tabla. En un proyecto nuevo de Supabase: correr `sql/01` a `sql/12`, crear
+los usuarios en Authentication con los mismos correos (`usuarios-000.json`),
+y cargar las tablas en este orden, porque unas dependen de otras:
+`locations`, `profiles` (los id deben coincidir con los usuarios nuevos),
+`flavors`, `toppings`, `supplies`, `customers`, `loyalty_config`, `sales`,
+`sale_lines`, `expenses`, `purchases`, `order_voids`, `weight_authorizations`,
+`loyalty_transactions`, `closing_email_log`, `audit_log`. Con
+`jsonb_populate_recordset` se carga un archivo entero en una sentencia.

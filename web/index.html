@@ -63,6 +63,7 @@
         <button class="tab-btn" data-tab="toppings" data-min-role="gerente">Toppings</button>
         <button class="tab-btn" data-tab="clientes" data-min-role="gerente">Clientes</button>
         <button class="tab-btn" data-tab="gastos" data-min-role="gerente">Gastos</button>
+        <button class="tab-btn" data-tab="compras" data-min-role="gerente">Compras</button>
         <button class="tab-btn" data-tab="reportes" data-min-role="gerente">Reportes</button>
         <button class="tab-btn" data-tab="config" data-min-role="gerente">Configuración</button>
         <button class="tab-btn" data-tab="admin" data-min-role="propietario">Sucursales y usuarios</button>
@@ -549,6 +550,65 @@
       </div>
     </section>
 
+    <!-- ===================== COMPRAS ===================== -->
+    <section id="tab-compras" class="tab-panel">
+
+      <div class="card no-print">
+        <h2>Libro de compras</h2>
+        <div class="sub">
+          Cada factura de proveedor, como en el libro de compras de ICG: gastos (CTG), materia prima
+          que llega de la bodega (CTH) y materia prima que la tienda compra directo (su serie, por ejemplo 011C).
+          Las compras son para el contador y no cambian el inventario; los gastos de operación del tablero se
+          siguen registrando en Gastos.
+        </div>
+        <div class="filter-bar">
+          <div class="field stack"><label for="cmp-location">Tienda</label><select id="cmp-location"></select></div>
+          <div class="field stack"><label for="cmp-from">Desde</label><input type="date" id="cmp-from"></div>
+          <div class="field stack"><label for="cmp-to">Hasta</label><input type="date" id="cmp-to"></div>
+          <button class="btn ghost" id="btn-cmp-refresh" type="button">Actualizar</button>
+          <button class="btn primary" id="btn-cmp-download" type="button">Descargar Excel</button>
+        </div>
+        <div id="cmp-warnings"></div>
+        <div class="kpi-grid" id="cmp-kpis"></div>
+      </div>
+
+      <div class="card no-print">
+        <h2>Registrar una compra</h2>
+        <div class="field"><label for="nc-tipo">Tipo</label><select id="nc-tipo">
+          <option value="materia_tienda">Materia prima comprada por la tienda</option>
+          <option value="materia_bodega">Materia prima desde bodega (CTH)</option>
+          <option value="gasto">Gasto (CTG)</option>
+        </select></div>
+        <div class="field"><label for="nc-location">De</label><select id="nc-location"></select></div>
+        <div class="field"><label for="nc-received">Fecha de entrada</label><input type="date" id="nc-received"></div>
+        <div class="field"><label for="nc-invoice-date">Fecha de la factura</label><input type="date" id="nc-invoice-date"></div>
+        <div class="field stack"><label for="nc-supplier">Proveedor</label><input id="nc-supplier" maxlength="160" placeholder="Nombre o razón social"></div>
+        <div class="field"><label for="nc-rtn">RTN del proveedor</label><input id="nc-rtn" inputmode="numeric" maxlength="14" placeholder="14 dígitos"></div>
+        <div class="field"><label for="nc-code">Código de proveedor</label><input id="nc-code" maxlength="20" placeholder="Opcional"></div>
+        <div class="field"><label for="nc-invoice">No. de factura</label><input id="nc-invoice" maxlength="40" placeholder="000-001-01-00000000"></div>
+        <div class="field stack"><label for="nc-cai">CAI de la factura</label><input id="nc-cai" maxlength="60"></div>
+        <div class="field stack"><label for="nc-desc">Descripción</label><input id="nc-desc" maxlength="300" placeholder="Opcional"></div>
+        <div class="field"><label for="nc-exento">Importe exento</label><input id="nc-exento" type="number" step="0.01" min="0"></div>
+        <div class="field"><label for="nc-g15">Gravado 15%</label><input id="nc-g15" type="number" step="0.01" min="0"></div>
+        <div class="field"><label for="nc-isv15">ISV 15%</label><input id="nc-isv15" type="number" step="0.01" min="0"></div>
+        <div class="field"><label for="nc-g18">Gravado 18%</label><input id="nc-g18" type="number" step="0.01" min="0"></div>
+        <div class="field"><label for="nc-isv18">ISV 18%</label><input id="nc-isv18" type="number" step="0.01" min="0"></div>
+        <div class="field"><label for="nc-desc-monto">Descuentos</label><input id="nc-desc-monto" type="number" step="0.01" min="0"></div>
+        <p class="hint">El ISV se calcula solo al escribir el gravado; si la factura dice otra cosa por centavos, corrígelo a mano.</p>
+        <p class="kpi-value num" id="nc-total"></p>
+        <button class="btn primary" id="btn-nc-add" type="button">Agregar compra</button>
+        <div id="nc-msg"></div>
+      </div>
+
+      <div class="card">
+        <h2>Detalle</h2>
+        <div class="table-wrap"><table class="data" id="table-compras">
+          <thead><tr><th>Entrada</th><th>Serie</th><th>Proveedor</th><th>Factura</th><th>Exento</th><th>Gravado</th><th>ISV</th><th>Total</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+    </section>
+
     <!-- ===================== REPORTES ===================== -->
     <section id="tab-reportes" class="tab-panel">
       <div class="card no-print" id="owner-location-picker" hidden>
@@ -567,6 +627,11 @@
         <div class="closing-print-head" id="closing-print-head"></div>
         <div class="field no-print"><label>Fecha</label><input type="date" id="closing-date"></div>
         <div class="kpi-grid" id="closing-summary"></div>
+        <div class="sub" style="margin-top:14px;">Cuadre por forma de pago: lo que tiene que haber en caja, en el datáfono y en transferencias.</div>
+        <div class="table-wrap"><table class="data" id="table-closing-pay">
+          <thead><tr><th>Forma de pago</th><th>Ventas</th><th>Total</th></tr></thead><tbody></tbody>
+        </table></div>
+        <p class="hint" id="closing-pay-note"></p>
         <div class="sub" style="margin-top:14px;">Toppings vendidos ese día, con su % sobre el total de peso de toppings.</div>
         <div class="table-wrap"><table class="data" id="table-closing-toppings">
           <thead><tr><th>Topping</th><th>Peso vendido</th><th>% del total</th></tr></thead><tbody></tbody>
@@ -641,6 +706,7 @@
         </div>
         <div class="field"><label>Moneda</label><input id="cfg-currency" placeholder="GTQ, USD, HNL…"></div>
         <div class="field"><label id="cfg-taxid-label">NIT</label><input id="cfg-taxid"></div>
+        <div class="field"><label for="cfg-purchase-series">Serie de compras de la tienda</label><input id="cfg-purchase-series" maxlength="8" placeholder="Ej. 011C"></div>
         <div class="field stack"><label>Dirección</label><input id="cfg-address"></div>
 
         <h2 style="margin-top:18px;">Logo</h2>
