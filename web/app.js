@@ -583,7 +583,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     if (btn.dataset.tab === "dashboard" && !DASH.loaded) loadDashboard();
     if (btn.dataset.tab === "gastos" && !GAS.loaded) cargarGastos();
     if (btn.dataset.tab === "clientes") { llenarReglas(); if (!CLI.loaded) cargarClientes(""); }
-    if (btn.dataset.tab === "reportes") cargarControlPesos();
+    if (btn.dataset.tab === "reportes") { cargarControlPesos(); prepararLibroVentas(); }
     if (btn.dataset.tab === "config") pintarEstadoPin();
   });
 });
@@ -2104,6 +2104,68 @@ async function cargarControlPesos() {
   });
 }
 $("btn-wc-load").addEventListener("click", cargarControlPesos);
+
+/* --- Libro de ventas (formato ICG) -----------------------------------------
+   Lee las ventas del rango directo de la tabla (RLS decide qué tiendas puede
+   ver quien lo pide) y arma el Excel en el navegador con libro-ventas.js.
+   El propietario en "todas" recibe una hoja por tienda, como ICG saca un
+   reporte por punto de venta: no se mezclan correlativos de dos tiendas. */
+function prepararLibroVentas() {
+  if ($("lv-from").value) return;
+  const hoy = new Date();
+  $("lv-from").value = localDateStr(new Date(hoy.getFullYear(), hoy.getMonth(), 1));
+  $("lv-to").value = localDateStr(hoy);
+}
+
+async function ventasDelRango(locationId, desde, hasta, desfase) {
+  // Medianoche de la tienda expresada en UTC.
+  const inicio = new Date(Date.parse(desde + "T00:00:00Z") - desfase * 3600e3).toISOString();
+  const fin = new Date(Date.parse(hasta + "T00:00:00Z") + 864e5 - desfase * 3600e3).toISOString();
+  const todas = [];
+  for (let pag = 0; ; pag++) {
+    const { data, error } = await sb.from("sales")
+      .select("created_at, folio, customer_name, customer_tax_id, total_price, discount, location_id")
+      .eq("location_id", locationId).gte("created_at", inicio).lt("created_at", fin)
+      .order("created_at", { ascending: true }).range(pag * 1000, pag * 1000 + 999);
+    if (error) throw error;
+    todas.push(...(data || []));
+    if (!data || data.length < 1000) return todas;
+  }
+}
+
+$("btn-lv-download").addEventListener("click", async () => {
+  const msg = (t, tipo) => {
+    $("lv-msg").innerHTML = !t ? "" : tipo === "info" ? `<p class="hint">${esc(t)}</p>` : `<div class="alert warn">${esc(t)}</div>`;
+  };
+  const desde = $("lv-from").value, hasta = $("lv-to").value;
+  if (!desde || !hasta || desde > hasta) { msg("Revisa las fechas: “Desde” tiene que ser antes de “Hasta”."); return; }
+  if (!sb) { msg("Para sacar el libro hace falta conexión a internet."); return; }
+  const scope = reportScopeId();
+  const locs = scope ? STATE.locations.filter((l) => l.id === scope) : STATE.locations.filter((l) => l.active);
+  const desfase = Number(CFG.UTC_OFFSET_HOURS ?? -6);
+  const btn = $("btn-lv-download"); btn.disabled = true; msg("Preparando el libro…", "info");
+  try {
+    const hojas = [];
+    let facturas = 0;
+    for (const loc of locs) {
+      const ventas = await ventasDelRango(loc.id, desde, hasta, desfase);
+      const h = LibroVentas.hojaLibro({ tienda: loc.name, pais: loc.country_code, desde, hasta, ventas, desfase });
+      facturas += h.filas.length;
+      hojas.push({ nombre: loc.name, matriz: h.matriz });
+    }
+    const bytes = LibroVentas.crearXlsx(hojas);
+    const quien = locs.length === 1 ? locs[0].name : "todas";
+    const nombre = `libro-ventas_${quien}_${desde}_${hasta}.xlsx`.replace(/[^\w.-]+/g, "-");
+    const url = URL.createObjectURL(new Blob([bytes], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }));
+    const a = document.createElement("a"); a.href = url; a.download = nombre;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    msg(facturas ? "" : "No hubo ventas en esas fechas; el libro sale solo con encabezado y totales en cero.", "info");
+  } catch (e) {
+    console.error(e);
+    msg("No se pudo sacar el libro de ventas. Si sigue pasando, avísale a soporte técnico.");
+  } finally { btn.disabled = false; }
+});
 
 /* ===========================================================================
    13. SUCURSALES Y USUARIOS (solo propietario)

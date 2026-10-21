@@ -25,7 +25,8 @@ async function abrir(rol, { serial = true, huella = false, fuera = false, movil 
                   userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1" } : {}) });
   await ctx.addInitScript((r) => { if (!localStorage.getItem("fake_role")) localStorage.setItem("fake_role", r); }, rol);
   if (fuera) await ctx.addInitScript(() => { if (!sessionStorage.getItem("ya")) { localStorage.setItem("fake_logged_out", "1"); sessionStorage.setItem("ya", "1"); } });
-  if (huella) await ctx.route("**/config.js", (r) => r.fulfill({ contentType: "application/javascript", body: configReal.replace("PASSKEYS: false", "PASSKEYS: true") }));
+  // La huella se prende o se apaga en la prueba, sin importar cómo esté config.js.
+  await ctx.route("**/config.js", (r) => r.fulfill({ contentType: "application/javascript", body: configReal.replace(/PASSKEYS:\s*(true|false)/, `PASSKEYS: ${huella}`) }));
   if (serial) await ctx.addInitScript(fakeSerial);
   await ctx.route("**/vendor/supabase.min.js", (r) => r.fulfill({ contentType: "application/javascript", body: fakeSb }));
   const page = await ctx.newPage();
@@ -267,6 +268,22 @@ const texto = (page, sel) => page.locator(sel).innerText();
   await g.page.click('.tab-btn[data-tab="reportes"]');
   await g.page.waitForSelector("#table-wc-incidents tbody tr td");
   ok((await texto(g.page, "#table-wc-incidents")).includes("(huella)"), "25 el reporte dice si se autorizó con huella o con PIN");
+
+  // Libro de ventas en formato ICG: se descarga un .xlsx de verdad.
+  await g.page.evaluate(() => localStorage.setItem("fake_sales", JSON.stringify([
+    { location_id: "L1", created_at: "2026-10-02T03:30:00Z", folio: 2, customer_name: "", customer_tax_id: null, total_price: 262.14, discount: 0 },
+    { location_id: "L1", created_at: "2026-10-01T15:00:00Z", folio: 1, customer_name: "Ana <b>López</b>", customer_tax_id: "08011999000001", total_price: 100, discount: 20 },
+  ])));
+  await g.page.reload(); await g.page.waitForSelector("#app:not([hidden])");
+  await g.page.click('.tab-btn[data-tab="reportes"]');
+  ok(/^\d{4}-\d{2}-01$/.test(await g.page.inputValue("#lv-from")), "26 el libro arranca en el primero del mes");
+  await g.page.fill("#lv-from", "2026-10-01"); await g.page.fill("#lv-to", "2026-10-31");
+  const [descarga] = await Promise.all([g.page.waitForEvent("download"), g.page.click("#btn-lv-download")]);
+  const destino = path.join(process.env.LIBRO_DESTINO || AQUI, "libro-prueba.xlsx");
+  await descarga.saveAs(destino);
+  ok(descarga.suggestedFilename() === "libro-ventas_Tuti-s-Galer-as_2026-10-01_2026-10-31.xlsx", "26b el archivo se llama por tienda y fechas", descarga.suggestedFilename());
+  ok(fs.statSync(destino).size > 1000 && fs.readFileSync(destino).subarray(0, 2).toString() === "PK", "26c es un .xlsx (zip)");
+  ok(g.errores.length === 0, "26d sin errores de JavaScript (libro)", g.errores);
   await g.ctx.close();
 }
 

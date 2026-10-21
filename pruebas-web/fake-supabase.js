@@ -13,7 +13,7 @@
       { id: "S2", location_id: "L1", name: "Cuchara", kind: "cuchara", tare_weight_g: 0, cost_per_unit: 0.38, stock_qty: 900, active: true },
     ],
     profiles: [{ id: "U1", role: rol, location_id: rol === "propietario" ? null : "L1", active: true, full_name: rol === "cajera" ? "Cajera Uno" : "Gerente Uno" }],
-    sales: [], loyalty_config: [], expenses: [], audit_log: [], customers: [], loyalty_transactions: [], sale_lines: [],
+    sales: JSON.parse(localStorage.getItem("fake_sales") || "[]"), loyalty_config: [], expenses: [], audit_log: [], customers: [], loyalty_transactions: [], sale_lines: [],
   };
   const log = JSON.parse(localStorage.getItem("fake_rpcs") || "[]");
   function anotar(name, args) { log.push({ name, args }); localStorage.setItem("fake_rpcs", JSON.stringify(log)); }

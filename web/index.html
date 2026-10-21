@@ -578,6 +578,19 @@
         <p class="hint no-print" id="closing-email-hint"></p>
       </div>
 
+      <div class="card no-print" id="libro-ventas-card">
+        <h2>Libro de ventas</h2>
+        <div class="sub">
+          Excel con las mismas columnas del “Reporte fiscal de ventas” de ICG, para el contador.
+          Mientras no esté conectada la facturación de la SAR son comprobantes internos:
+          sin CAI y con el folio de la tienda como correlativo. El ISV se separa del total cobrado.
+        </div>
+        <div class="field"><label>Desde</label><input type="date" id="lv-from"></div>
+        <div class="field"><label>Hasta</label><input type="date" id="lv-to">
+          <button class="btn primary small" id="btn-lv-download" type="button">Descargar Excel</button></div>
+        <div id="lv-msg"></div>
+      </div>
+
       <div class="card">
         <h2>Costo-beneficio por topping</h2>
         <div class="sub">De menor a mayor margen acumulado — para decidir a qué toppings subirles el recargo.</div>
@@ -811,6 +824,7 @@
      cambiar el codigo que corre en la caja. -->
 <script src="vendor/supabase.min.js"></script>
 <script src="bascula.js"></script>
+<script src="libro-ventas.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

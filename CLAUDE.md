@@ -75,6 +75,7 @@ sql/pruebas/        prueba_aislamiento.sql (13) + prueba_seguridad.sql (48 ataqu
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
 web/app.js          toda la lógica (17 secciones numeradas)
 web/bascula.js      protocolo de la báscula (CAS PD-II en NCI); se prueba en Node
+web/libro-ventas.js libro de ventas en el formato ICG (Excel .xlsx hecho a mano); se prueba en Node
 caja/               modo kiosko de Chrome + cómo configurar la báscula (ver su LEEME.md)
 pruebas-web/        pruebas de la pantalla de venta con Playwright y báscula simulada
 web/styles.css      estilos, modo día/noche
@@ -485,6 +486,23 @@ precios las define ella; Samuel lleva el sistema):
   - **011C / 021C**: materia prima comprada y recibida directo por cada
     tienda, y cada tienda la ingresa. Falta confirmar cuál código es de
     cuál tienda (probable: 011C Galerías, 021C Multiplaza).
+
+### 5.2 Libro de ventas en formato ICG
+
+*Reportes → Libro de ventas* descarga un .xlsx con las columnas exactas del
+"Reporte fiscal de ventas" de FrontRetail (rptVentasFRetail), para el
+contador. Lo que no hay que deshacer:
+
+1. **No simula ser fiscal.** Tipo de documento "COMPROBANTE INTERNO", CAI
+   vacío, correlativo = folio interno, y el título lo dice. Cuando se conecte
+   la SAR, ahí entran el CAI y el correlativo de verdad.
+2. **El ISV se separa del total cobrado**: gravado = total/1.15 a centavos,
+   ISV = total − gravado, así cuadran factura por factura. Con las 2,415
+   facturas de agosto de Galerías da lo mismo que ICG con diferencia de
+   centavos (ICG arrastra fracciones de centavo).
+3. **Una hoja por tienda** en el consolidado: los correlativos no se mezclan.
+4. **El .xlsx se arma a mano** (ZIP sin comprimir + XML): la CSP no permite
+   librerías. Todo en Arial.
 
 ## 6. Cómo probar los cambios
 
