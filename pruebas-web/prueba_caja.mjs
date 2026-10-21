@@ -383,6 +383,29 @@ const texto = (page, sel) => page.locator(sel).innerText();
   await ctx.close();
 }
 
+/* ---------------- Pedidos de la app ---------------- */
+{
+  const { ctx, page, errores } = await abrir("cajera");
+  await page.evaluate(() => localStorage.setItem("fake_pedidos_app", JSON.stringify([
+    { id: "PA1", folio: 105, estado: "recibido", cliente: "Andrea <b>López</b>", carnet: "TK7RMQPAYB", hora: "ya", usar_puntos: true, creado: new Date().toISOString(), total: 215,
+      items: [{ nombre: "Taza mediana 12 oz", cantidad: 1, precio: 165, sabores: ["Taro", "Vainilla"], toppings: ["Oreo"], premium: ["Almendras"] },
+              { nombre: "Agua en botella", cantidad: 2, precio: 50 }] },
+  ])));
+  await page.reload(); await page.waitForSelector("#app:not([hidden])");
+  await page.waitForFunction(() => !document.querySelector("#pedidos-badge").hidden);
+  ok(await page.isVisible('.tab-btn[data-tab="pedidos"]') && (await texto(page, "#pedidos-badge")) === "1",
+     "31 la cajera ve la pestaña de pedidos de la app con 1 pedido nuevo");
+  await page.click('.tab-btn[data-tab="pedidos"]');
+  const tarjeta = await texto(page, "#pedidos-lista");
+  ok(tarjeta.includes("#105") && tarjeta.includes("Taro + Vainilla") && tarjeta.includes("quiere usar sus puntos") && !(await page.innerHTML("#pedidos-lista")).includes("<b>López"),
+     "31b el pedido muestra folio, detalle de la taza, si usa puntos, y escapa lo que viene de la base");
+  await page.click('#pedidos-lista button:has-text("Empezar a preparar")');
+  await page.waitForFunction(() => document.querySelector("#pedidos-lista").textContent.includes("Marcar listo"));
+  ok((await rpcs(page, "tienda_pedido_estado")).pop().args.p_estado === "preparando", "31c avanzar el pedido le avisa a la base (y el cliente lo ve)");
+  ok(errores.length === 0, "31d sin errores de JavaScript (pedidos)", errores);
+  await ctx.close();
+}
+
 /* ---------------- Costo y margen: solo la propietaria ---------------- */
 {
   const g = await abrir("gerente");

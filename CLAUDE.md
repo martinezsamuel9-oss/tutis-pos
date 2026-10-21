@@ -69,6 +69,9 @@ sql/12_compras_y_cierre.sql libro de compras (purchases), cierre por forma de pa
 sql/14_productos.sql        productos de precio fijo (agua, bebidas, porciones…), línea 'producto' con cantidad
 sql/15_productos_icg.sql    los productos legibles del video de la caja ICG, con precio CON ISV
 sql/16_tarjeta.sql          voucher de cada venta con tarjeta (autorización + últimos 4) y lista en el cierre
+sql/17_app_clientes.sql     app de clientes: carnet ligado al usuario, menú público, pedidos para recoger;
+                            y cierra el hueco del registro suelto (app_role exige sucursal)
+app-ios/           app nativa de iPhone (SwiftUI) para clientes: pedir, puntos, regalos (ver 3.9)
 sql/13_privilegios.sql      quita TRUNCATE, TRIGGER, REFERENCES y MAINTAIN (PG17) a anon y authenticated,
                             también para las tablas futuras (TRUNCATE se salta RLS)
 cierre-diario/      Worker programado: manda el cierre y respalda la base en R2 (ver su LEEME.md)
@@ -77,7 +80,7 @@ wallet/secretos/    llave y certificado de Apple — GITIGNORADO, nunca al repo
 sql/pruebas/        prueba_aislamiento.sql (13) + prueba_seguridad.sql (48 ataques)
                     + prueba_fidelizacion.sql (19) + prueba_pesos.sql (48)
                     + prueba_huella.sql (12) + prueba_compras.sql (28)
-                    + prueba_productos.sql (14) + prueba_tarjeta.sql (7)
+                    + prueba_productos.sql (14) + prueba_tarjeta.sql (7) + prueba_app.sql (32)
                     + borrar_datos_de_prueba.sql (quita las demostraciones)
                     + datos_de_demostracion.sql (14 días de ventas, borrables)
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
@@ -485,6 +488,29 @@ que deshacer:
 3. **Autorización repetida o vacía va en rojo** en Reportes y en el correo:
    es como se destapa una venta en efectivo pasada como tarjeta.
 
+## 3.9 App de clientes (iPhone) y el registro suelto
+
+`app-ios/`: SwiftUI, solo iPhone (decisión del dueño, 2026-10-21), firmada con
+el equipo 95P9N796G9, bundle `com.slabblu.tutis.app`. Habla con la base sin
+librerías (API.swift: Auth + RPC) con la llave PÚBLICA; la sesión va en el
+Llavero. Los clientes entran con **Iniciar sesión con Apple** (proveedor Apple
+de Supabase con Client ID = bundle). Lo que no hay que deshacer:
+
+1. **app_role() exige sucursal** (o ser propietaria). Antes, cualquiera que se
+   registrara con la llave pública nacía cajera activa sin sucursal y podía
+   LEER TODA la tabla de clientes. Un perfil sin sucursal no es personal.
+2. **Un cliente de la app no nace como personal**: handle_new_user solo crea
+   perfil para el proveedor "email" (las altas que hace la propietaria).
+3. **El carnet se vincula con código Y teléfono**, nunca solo el teléfono.
+4. **El precio del pedido lo calcula la base** (app_tamanos, products,
+   app_config); del teléfono solo se toma qué se pide. Tamaños de taza y
+   envío son DE EJEMPLO; domicilio está apagado (`app_config.acepta_domicilio`).
+5. **Un pedido no es una venta**: la caja lo ve en *Pedidos app*, lo avanza
+   (recibido → preparando → listo → entregado) y lo cobra en Venta con el
+   carnet, como siempre. El cliente ve el estado (consulta cada 10 s).
+6. Sabores y toppings de la app vienen de la web de la marca (fotos); las
+   tarjetas de regalo aún no existen en la base y la app lo dice.
+
 ## 4. Restricciones permanentes (pedidas explícitamente)
 
 - **NUNCA incluir el sitio web `https://tutis.innova504.com/` en la factura o
@@ -646,6 +672,7 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/13_privilegios.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/14_productos.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/15_productos_icg.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/16_tarjeta.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/17_app_clientes.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_aislamiento.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_seguridad.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_fidelizacion.sql
@@ -654,6 +681,7 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_huella.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_compras.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_productos.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_tarjeta.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_app.sql
 ```
 
 `00_simulacion_supabase.sql` recrea lo que Supabase ya trae (schema `auth`,

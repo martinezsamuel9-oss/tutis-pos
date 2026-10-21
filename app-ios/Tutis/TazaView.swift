@@ -3,17 +3,28 @@ import SwiftUI
 struct TazaView: View {
     @Environment(Estado.self) private var estado
     @Environment(\.dismiss) private var dismiss
-    @State private var taza = Taza()
+    @State private var taza = Taza(tamano: Tamano(id: "md", nombre: "Mediana", oz: 12, precio: 0, toppings: 3))
     @State private var abierta: String?
+    @State private var listo = false
+    private let saborInicial: String?
+    private let tamanoInicial: Tamano?
 
     init(saborInicial: String? = nil, tamanoInicial: Tamano? = nil) {
-        var t = Taza()
-        if let s = saborInicial { t.sabores = [s] }
-        if let tm = tamanoInicial { t.tamano = tm }
-        _taza = State(initialValue: t)
+        self.saborInicial = saborInicial; self.tamanoInicial = tamanoInicial
     }
 
     var body: some View {
+        contenido
+            .onAppear {
+                // El tamaño y su precio vienen de la base (por defecto, el mediano).
+                guard !listo else { return }
+                listo = true
+                if let tm = tamanoInicial ?? estado.tamanos.first(where: { $0.id == "md" }) ?? estado.tamanos.first { taza.tamano = tm }
+                if let s = saborInicial { taza.sabores = [s] }
+            }
+    }
+
+    private var contenido: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 ZStack(alignment: .bottom) {
@@ -29,15 +40,16 @@ struct TazaView: View {
 
                 seccion("Tamaño") {
                     HStack(spacing: 10) {
-                        ForEach(Catalogo.tamanos) { t in
+                        ForEach(estado.tamanos) { t in
                             let on = t == taza.tamano
+                            let lado: CGFloat = 14 + CGFloat(t.oz) * 1.2
                             Button {
                                 taza.tamano = t
                                 let tope = t.toppings
                                 if taza.toppings.count > tope { taza.toppings = Array(taza.toppings.prefix(tope)) }
                             } label: {
                                 VStack(spacing: 4) {
-                                    Image(systemName: "cup.and.saucer.fill").font(.system(size: CGFloat(18 + t.oz)))
+                                    Image("helado").resizable().scaledToFit().frame(width: lado, height: lado)
                                         .foregroundStyle(on ? Color.magenta : Color.tinta2).frame(height: 40)
                                     Text(t.nombre).font(.display(16))
                                     Text("\(t.oz) oz · \(lempiras(t.precio))").font(.system(size: 12)).foregroundStyle(Color.tinta2)
@@ -71,7 +83,7 @@ struct TazaView: View {
                 seccion("Toppings incluidos", detalle: "\(taza.toppings.count) de \(taza.tamano.toppings)") {
                     ForEach(Catalogo.familias) { f in familiaVista(f, tope: taza.tamano.toppings, lista: $taza.toppings, prefijo: f.id + ":") }
                 }
-                seccion("Premium", detalle: "+ \(lempiras(Catalogo.precioPremium)) c/u, porción aparte") {
+                seccion("Premium", detalle: "+ \(lempiras(estado.precioPremium)) c/u, porción aparte") {
                     familiaVista(Catalogo.premium, tope: 99, lista: $taza.premium, prefijo: "")
                 }
                 Text("Tamaños y precios de ejemplo: los define la dueña.")
@@ -93,11 +105,13 @@ struct TazaView: View {
                     let det = [taza.nombreSabores,
                                taza.toppings.compactMap { $0.split(separator: ":").last.map(String.init) }.joined(separator: ", "),
                                taza.premium.map { $0 + " (premium)" }.joined(separator: ", ")].filter { !$0.isEmpty }.joined(separator: " · ")
-                    estado.agregar(LineaPedido(nombre: "Taza \(taza.tamano.nombre.lowercased()) \(taza.tamano.oz) oz", precio: taza.precio,
-                                               foto: taza.sabores.first, detalle: det, cantidad: taza.cantidad))
+                    estado.agregar(LineaPedido(nombre: "Taza \(taza.tamano.nombre.lowercased()) \(taza.tamano.oz) oz", precio: taza.precio(premium: estado.precioPremium),
+                                               foto: taza.sabores.first, detalle: det, cantidad: taza.cantidad,
+                                               item: .taza(tamano: taza.tamano.id, sabores: taza.sabores.compactMap { Catalogo.sabor($0)?.nombre },
+                                                           toppings: taza.toppings.compactMap { $0.split(separator: ":").last.map(String.init) }, premium: taza.premium)))
                     dismiss()
                 } label: {
-                    Text(taza.sabores.isEmpty ? "Elige un sabor" : "Agregar · \(lempiras(taza.precio * Double(taza.cantidad)))").frame(maxWidth: .infinity)
+                    Text(taza.sabores.isEmpty ? "Elige un sabor" : "Agregar · \(lempiras(taza.precio(premium: estado.precioPremium) * Double(taza.cantidad)))").frame(maxWidth: .infinity)
                 }.buttonStyle(BotonPildora()).disabled(taza.sabores.isEmpty).opacity(taza.sabores.isEmpty ? 0.5 : 1)
             }
             .padding(14).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))

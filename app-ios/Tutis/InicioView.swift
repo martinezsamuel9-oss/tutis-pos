@@ -13,15 +13,18 @@ struct InicioView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 26) {
-                Text("\(saludo), \(estado.nombre). ¿Qué se te antoja hoy?")
+                Text(estado.nombre.isEmpty ? "\(saludo). ¿Qué se te antoja hoy?" : "\(saludo), \(estado.nombre). ¿Qué se te antoja hoy?")
                     .font(.titular(34)).tracking(-0.6).foregroundStyle(Color.tinta).padding(.top, 8)
 
                 HStack(spacing: 22) {
                     Button { irA(.puntos) } label: { Label("Mi carnet", systemImage: "qrcode") }
                     Button { irA(.pedir) } label: { Label("Tiendas", systemImage: "mappin.and.ellipse") }
                     Spacer()
-                    Text(String(estado.nombre.prefix(1))).font(.display(17, .bold)).foregroundStyle(Color.magentaHondo)
-                        .frame(width: 40, height: 40).overlay(Circle().stroke(Color.linea, lineWidth: 1.5))
+                    Button { if estado.fase != .listo { estado.pidiendoLogin = true } else { irA(.puntos) } } label: {
+                        Group { if estado.nombre.isEmpty { Image(systemName: "person") } else { Text(String(estado.nombre.prefix(1))) } }
+                            .font(.display(17, .bold)).foregroundStyle(Color.magentaHondo)
+                            .frame(width: 40, height: 40).overlay(Circle().stroke(Color.linea, lineWidth: 1.5))
+                    }
                 }
                 .font(.display(17, .medium)).foregroundStyle(Color.tinta).buttonStyle(.plain)
                 .padding(.bottom, 14).overlay(alignment: .bottom) { Rectangle().fill(Color.linea).frame(height: 1) }
@@ -49,24 +52,6 @@ struct InicioView: View {
                             }
                         }.padding(.horizontal, 20).padding(.vertical, 6).scrollTargetLayout()
                     }.scrollTargetBehavior(.viewAligned).padding(.horizontal, -20)
-                }
-
-                VStack(alignment: .leading, spacing: 14) {
-                    Text("Pide de nuevo").font(.display(23, .bold))
-                    Button {
-                        estado.agregar(LineaPedido(nombre: "Taza mediana 12 oz", precio: 135, foto: "taro", detalle: "Taro + Vainilla · Oreo, Fresas, Caramelo", cantidad: 1))
-                    } label: {
-                        HStack(spacing: 14) {
-                            Foto(nombre: "taro").frame(width: 72, height: 72).clipShape(RoundedRectangle(cornerRadius: 14))
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Taza mediana").font(.display(17)).foregroundStyle(Color.tinta)
-                                Text("Taro + Vainilla · Oreo, Fresas, Caramelo").font(.system(size: 14)).foregroundStyle(Color.tinta2)
-                            }
-                            Spacer()
-                            Image(systemName: "plus").font(.system(size: 15, weight: .bold)).frame(width: 34, height: 34)
-                                .background(Color.hundido, in: Circle()).foregroundStyle(Color.tinta)
-                        }.padding(12).background(Color.superficie, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-                    }.buttonStyle(.plain).shadow(color: .black.opacity(0.06), radius: 10, y: 3)
                 }
 
                 Button { irA(.regalar) } label: {
@@ -100,20 +85,32 @@ struct InicioView: View {
         .shadow(color: .black.opacity(0.06), radius: 10, y: 3)
     }
 
-    private var tarjetaPuntos: some View {
-        Button { irA(.puntos) } label: {
-            HStack {
-                VStack(alignment: .leading, spacing: 6) {
-                    Etiqueta(texto: "Tuti's Puntos")
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Text("\(estado.puntos)").font(.system(size: 38, weight: .heavy)).monospacedDigit().foregroundStyle(Color.tinta)
-                        Text("= \(lempiras(Double(estado.puntos)))").font(.system(size: 15)).foregroundStyle(Color.tinta2)
+    @ViewBuilder private var tarjetaPuntos: some View {
+        if estado.fase == .listo {
+            Button { irA(.puntos) } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Etiqueta(texto: "Tuti's Puntos")
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text("\(estado.puntos)").font(.system(size: 38, weight: .heavy)).monospacedDigit().foregroundStyle(Color.tinta)
+                            Text("= \(lempiras(Double(estado.puntos)))").font(.system(size: 15)).foregroundStyle(Color.tinta2)
+                        }
+                        ProgressView(value: min(1, Double(estado.puntos) / 100)).tint(Color.magenta)
                     }
-                    ProgressView(value: min(1, Double(estado.puntos) / 100)).tint(Color.magenta)
-                }
-                Spacer(minLength: 16)
-                Image(systemName: "chevron.right").font(.system(size: 14, weight: .bold)).frame(width: 34, height: 34).background(Color.hundido, in: Circle())
-            }.padding(18).background(Color.superficie, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-        }.buttonStyle(.plain).foregroundStyle(Color.tinta).shadow(color: .black.opacity(0.06), radius: 10, y: 3)
+                    Spacer(minLength: 16)
+                    Image(systemName: "chevron.right").font(.system(size: 14, weight: .bold)).frame(width: 34, height: 34).background(Color.hundido, in: Circle())
+                }.padding(18).background(Color.superficie, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            }.buttonStyle(.plain).foregroundStyle(Color.tinta).shadow(color: .black.opacity(0.06), radius: 10, y: 3)
+        } else {
+            VStack(alignment: .leading, spacing: 10) {
+                Etiqueta(texto: "Tuti's Puntos")
+                Text("Junta puntos con cada compra").font(.display(21, .bold)).foregroundStyle(Color.tinta)
+                Text("1 punto por cada L \(Int(estado.montoPorPunto)); cada punto vale L 1. Si ya tienes carnet de la caja, tus puntos se vienen contigo.")
+                    .font(.system(size: 15)).foregroundStyle(Color.tinta2).fixedSize(horizontal: false, vertical: true)
+                Button("Únete o entra") { estado.pidiendoLogin = true }.buttonStyle(BotonPildora())
+            }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.superficie, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .shadow(color: .black.opacity(0.06), radius: 10, y: 3)
+        }
     }
 }

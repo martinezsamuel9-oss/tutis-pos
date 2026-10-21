@@ -552,3 +552,21 @@ table.data tr.low-stock td { background: var(--danger-bg); }
 .or-sep { display: flex; align-items: center; gap: 10px; margin: 14px 0; color: var(--ink-soft); font-size: 0.78rem; }
 .or-sep::before, .or-sep::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
 #table-huellas .tl-meta { display: block; font-weight: 400; color: var(--ink-soft); font-size: 0.74rem; margin-top: 2px; }
+
+/* --- Pedidos de la app ---------------------------------------------------- */
+.tab-badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; margin-left: 4px; border-radius: 99px; background: var(--danger); color: #fff; font-size: .72rem; font-weight: 700; }
+.pedidos-lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-top: 12px; }
+.pedido-app { border: 2px solid var(--border); border-radius: var(--radius-m); padding: 14px; display: grid; gap: 8px; background: var(--surface); }
+.pedido-app header { display: flex; justify-content: space-between; align-items: center; }
+.pedido-folio { font-size: 1.8rem; font-weight: 700; }
+.pedido-app .estado-chip { font-size: .78rem; font-weight: 700; padding: 4px 10px; border-radius: 99px; background: var(--surface-2); }
+.pedido-app.estado-recibido { border-color: var(--danger); }
+.pedido-app.estado-recibido .estado-chip { background: var(--danger-bg); color: var(--danger); }
+.pedido-app.estado-preparando .estado-chip { background: var(--warn-bg); color: var(--warn); }
+.pedido-app.estado-listo { border-color: var(--success); }
+.pedido-app.estado-listo .estado-chip { background: var(--success-bg); color: var(--success); }
+.pedido-app.estado-entregado, .pedido-app.estado-cancelado { opacity: .6; }
+.pedido-app ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.pedido-total { display: flex; justify-content: space-between; font-size: 1.1rem; border-top: 1px dashed var(--border); padding-top: 8px; }
+.pedido-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
+.pedido-acciones .btn { flex: 1; min-width: 120px; }

@@ -1,16 +1,16 @@
 import SwiftUI
 import Observation
 
-// Datos del prototipo. Sabores y toppings: los de la web de Tuti's (con sus
-// fotos). Bebidas y porciones: el catálogo de la caja. Tamaños de taza, envío
-// y montos de tarjeta de regalo: de ejemplo. Puntos: L 27 = 1 punto = L 1.
+// Lo que viene de la BASE: tiendas, tamaños de taza, productos con su precio,
+// carnet y puntos, pedidos. Lo que sigue en la app: los sabores y toppings con
+// sus fotos (el catálogo de la web de Tuti's; en la base todavía no está el
+// real) y los diseños de tarjeta de regalo (aún sin respaldo en la base).
 
 struct Sabor: Identifiable, Hashable { let id: String; let nombre: String }
 struct Familia: Identifiable { let id: String; let nombre: String; let opciones: [String] }
 struct Tamano: Identifiable, Hashable { let id: String; let nombre: String; let oz: Int; let precio: Double; let toppings: Int }
-struct Producto: Identifiable, Hashable { var id: String { nombre }; let categoria: String; let nombre: String; let precio: Double; let detalle: String; let foto: String? }
-struct Categoria: Identifiable, Hashable { let id: String; let nombre: String; let detalle: String; let foto: String }
-struct Tienda: Identifiable, Hashable { let id: String; let nombre: String; let lugar: String; let minutos: Int }
+struct Producto: Identifiable, Hashable { let id: String; let tienda: String; let familia: String; let nombre: String; let precio: Double }
+struct Tienda: Identifiable, Hashable { let id: String; let nombre: String; let lugar: String; var minutos: Int = 15 }
 struct DisenoRegalo: Identifiable, Hashable { let id: String; let seccion: String; let mensaje: String; let foto: String; let fondo: UInt32; let tinta: UInt32 }
 
 enum Catalogo {
@@ -35,33 +35,7 @@ enum Catalogo {
         Familia(id: "salsas", nombre: "Salsas", opciones: ["Peanut Butter", "Nutella", "Caramelo", "Hershey Syrup", "Leche condensada", "Marshmallow"]),
     ]
     static let premium = Familia(id: "toppings-premium", nombre: "Toppings premium", opciones: ["M&M's", "Almendras", "Sour Power", "Cookies & Cream", "Mini Reese's"])
-    static let precioPremium = 30.0
 
-    static let tamanos = [
-        Tamano(id: "ch", nombre: "Chica", oz: 8, precio: 95, toppings: 2),
-        Tamano(id: "md", nombre: "Mediana", oz: 12, precio: 135, toppings: 3),
-        Tamano(id: "gr", nombre: "Grande", oz: 16, precio: 175, toppings: 4),
-    ]
-    static let categorias = [
-        Categoria(id: "tazas", nombre: "Tazas de yogurt", detalle: "Arma la tuya", foto: "taro"),
-        Categoria(id: "bebidas", nombre: "Bebidas", detalle: "Frías y para llevar", foto: "sorbete-de-toronja"),
-        Categoria(id: "llevar", nombre: "Toppings para llevar", detalle: "Porciones", foto: "t-toppings-especiales"),
-        Categoria(id: "temporada", nombre: "Temporada", detalle: "Por tiempo limitado", foto: "smores"),
-    ]
-    static let productos = [
-        Producto(categoria: "bebidas", nombre: "Agua en botella", precio: 25, detalle: "Para acompañar tu taza", foto: nil),
-        Producto(categoria: "bebidas", nombre: "Latte frío", precio: 65, detalle: "Espresso y leche sobre hielo", foto: nil),
-        Producto(categoria: "bebidas", nombre: "Limonada frappé", precio: 80, detalle: "Limón natural, granizado", foto: nil),
-        Producto(categoria: "llevar", nombre: "Topping normal", precio: 20, detalle: "Porción para llevar", foto: "t-galletas"),
-        Producto(categoria: "llevar", nombre: "Topping premium", precio: 30, detalle: "Porción para llevar", foto: "t-toppings-premium"),
-        Producto(categoria: "llevar", nombre: "Crocante chocolate", precio: 60, detalle: "Porción premium", foto: "t-chocolates"),
-        Producto(categoria: "llevar", nombre: "Cobertura pistacho", precio: 60, detalle: "Porción premium", foto: "pistacho"),
-        Producto(categoria: "temporada", nombre: "S'more fibra miel", precio: 45, detalle: "Solo por temporada", foto: "smores"),
-    ]
-    static let tiendas = [
-        Tienda(id: "gal", nombre: "Tuti's Galerías", lugar: "Mall Galerías", minutos: 12),
-        Tienda(id: "mul", nombre: "Tuti's Multiplaza", lugar: "Mall Multiplaza", minutos: 18),
-    ]
     static let regalos = [
         DisenoRegalo(id: "cumple", seccion: "Cumpleaños", mensaje: "¡Feliz cumple!", foto: "g-cumple", fondo: 0xFFE36E, tinta: 0x2B1622),
         DisenoRegalo(id: "redvelvet", seccion: "Cumpleaños", mensaje: "Otro año más dulce", foto: "g-redvelvet", fondo: 0xFFD3DC, tinta: 0x7A1030),
@@ -72,8 +46,32 @@ enum Catalogo {
         DisenoRegalo(id: "celebra", seccion: "Celebración", mensaje: "¡Lo lograste!", foto: "g-celebra", fondo: 0xFFF1C9, tinta: 0x9A4A00),
         DisenoRegalo(id: "paraTi", seccion: "Celebración", mensaje: "Un antojo para ti", foto: "g-paraTi", fondo: 0xF3E6D8, tinta: 0x5A3218),
     ]
-    static let montoPorPunto = 27.0
     static func sabor(_ id: String) -> Sabor? { sabores.first { $0.id == id } }
+
+    // Foto para cada familia de productos de la caja.
+    static func fotoFamilia(_ f: String) -> String {
+        switch f.lowercased() {
+        case "bebidas": return "sorbete-de-toronja"
+        case "toppings": return "t-toppings-especiales"
+        case "temporada": return "smores"
+        default: return "t-dulces"
+        }
+    }
+    static func fotoProducto(_ nombre: String) -> String? {
+        let n = nombre.lowercased()
+        if n.contains("premium") { return "t-toppings-premium" }
+        if n.contains("topping") { return "t-galletas" }
+        if n.contains("crocante") || n.contains("chocolate") { return "t-chocolates" }
+        if n.contains("pistacho") { return "pistacho" }
+        if n.contains("cobertura") { return "t-salsas" }
+        if n.contains("s'more") || n.contains("smore") { return "smores" }
+        return nil
+    }
+}
+
+enum ItemPedido: Equatable {
+    case taza(tamano: String, sabores: [String], toppings: [String], premium: [String])
+    case producto(id: String)
 }
 
 struct LineaPedido: Identifiable, Equatable {
@@ -83,74 +81,134 @@ struct LineaPedido: Identifiable, Equatable {
     let foto: String?
     let detalle: String
     var cantidad: Int
+    let item: ItemPedido
+
+    var payload: [String: Any] {
+        switch item {
+        case let .taza(t, s, tp, p): return ["tipo": "taza", "tamano": t, "sabores": s, "toppings": tp, "premium": p, "cantidad": cantidad]
+        case let .producto(id): return ["tipo": "producto", "producto": id, "cantidad": cantidad]
+        }
+    }
 }
 
 struct Taza {
-    var tamano: Tamano = Catalogo.tamanos[1]
+    var tamano: Tamano
     var sabores: [String] = []
     var toppings: [String] = []      // "familia:opción"
     var premium: [String] = []
     var cantidad = 1
-    var precio: Double { tamano.precio + Double(premium.count) * Catalogo.precioPremium }
+    func precio(premium p: Double) -> Double { tamano.precio + Double(premium.count) * p }
     var nombreSabores: String { sabores.compactMap { Catalogo.sabor($0)?.nombre }.joined(separator: " + ") }
 }
 
-struct PedidoEnCurso {
-    let folio: Int
-    var paso: Int
-    let total: Double
-    let recoger: Bool
-    let tienda: Tienda
-    let hora: String
-    let lineas: [LineaPedido]
-    let puntos: Int
-}
+enum Fase { case cargando, invitado, sinCarnet, listo }
 
-struct TarjetaRegalo: Identifiable { let id = UUID(); let diseno: DisenoRegalo; var saldo: Double; let numero: String }
-
-@Observable
+@MainActor @Observable
 final class Estado {
-    var nombre = "Andrea"
-    var puntos = 86
-    let codigo = "TK7RMQPAYB"
+    var fase: Fase = .cargando
+    var carnet: CarnetServidor?
+    var movimientos: [MovimientoServidor] = []
+    var pedidos: [PedidoServidor] = []
+    var errorMenu: String?
+
+    var tiendas: [Tienda] = []
+    var tamanos: [Tamano] = []
+    var productos: [Producto] = []
+    var precioPremium = 30.0
+    var aceptaDomicilio = false
+    var costoEnvio = 50.0
+    var montoPorPunto = 27.0
+
     var recoger = true
-    var tienda = Catalogo.tiendas[0]
+    var tiendaId: String?
     var hora = "ya"
     var usarPuntos = false
     var carrito: [LineaPedido] = []
-    var pedido: PedidoEnCurso?
-    var misTarjetas = [TarjetaRegalo(diseno: Catalogo.regalos[0], saldo: 250, numero: "6831 9902")]
     var aviso: String?
+    var pidiendoLogin = false
+    var misTarjetas: [(diseno: DisenoRegalo, saldo: Double, numero: String)] = []
 
+    var nombre: String { carnet?.nombre ?? "" }
+    var puntos: Int { carnet?.puntos ?? 0 }
+    var tienda: Tienda? { tiendas.first { $0.id == tiendaId } ?? tiendas.first }
     var piezas: Int { carrito.reduce(0) { $0 + $1.cantidad } }
     var subtotal: Double { carrito.reduce(0) { $0 + $1.precio * Double($1.cantidad) } }
-    var envio: Double { !recoger && !carrito.isEmpty ? 50 : 0 }
-    var descuento: Double { usarPuntos ? min(Double(puntos), ((subtotal + envio) * 0.5).rounded(.down)) : 0 }
-    var aPagar: Double { subtotal + envio - descuento }
+    var envio: Double { !recoger && !carrito.isEmpty ? costoEnvio : 0 }
+    var pedidoActivo: PedidoServidor? { pedidos.first { ["recibido", "preparando", "listo"].contains($0.estado) } }
+    var familias: [String] {
+        guard let t = tienda else { return [] }
+        return productos.filter { $0.tienda == t.id }.map(\.familia).reduce(into: []) { if !$0.contains($1) { $0.append($1) } }
+    }
 
+    // --- Arranque ------------------------------------------------------------
+    func cargar() async {
+        do {
+            let m: MenuServidor = try await API.shared.rpc("app_menu")
+            tiendas = m.tiendas.map { Tienda(id: $0.id, nombre: $0.nombre, lugar: $0.lugar) }
+            tamanos = m.tamanos.map { Tamano(id: $0.id, nombre: $0.nombre, oz: $0.oz, precio: $0.precio, toppings: $0.toppings) }
+            productos = m.productos.map { Producto(id: $0.id, tienda: $0.tienda, familia: $0.familia, nombre: $0.nombre, precio: $0.precio) }
+            precioPremium = m.premium; aceptaDomicilio = m.domicilio; costoEnvio = m.envio
+            if let mp = m.monto_por_punto { montoPorPunto = mp }
+            if tiendaId == nil { tiendaId = tiendas.first?.id }
+            errorMenu = nil
+        } catch { errorMenu = error.localizedDescription }
+        await cargarCliente()
+    }
+
+    func cargarCliente() async {
+        guard API.shared.conSesion else { fase = .invitado; carnet = nil; return }
+        do {
+            let c: CarnetServidor? = try await API.shared.rpc("app_mi_carnet")
+            carnet = c
+            fase = c == nil ? .sinCarnet : .listo
+            if c != nil { await refrescar() }
+        } catch { fase = API.shared.conSesion ? .sinCarnet : .invitado }
+    }
+
+    func refrescar() async {
+        guard fase == .listo else { return }
+        if let p: [PedidoServidor] = try? await API.shared.rpc("app_mis_pedidos") { pedidos = p }
+        if let m: [MovimientoServidor] = try? await API.shared.rpc("app_movimientos") { movimientos = m }
+        if let c: CarnetServidor? = try? await API.shared.rpc("app_mi_carnet"), let c { carnet = c }
+    }
+
+    // --- Cuenta y carnet -------------------------------------------------------
+    func entrar(idToken: String, nonce: String) async throws {
+        try await API.shared.entrarConApple(idToken: idToken, nonce: nonce)
+        await cargarCliente()
+    }
+    func registrarme(nombre: String, telefono: String) async throws {
+        let c: CarnetServidor = try await API.shared.rpc("app_registrarme", ["p_nombre": nombre, "p_telefono": telefono])
+        carnet = c; fase = .listo; await refrescar()
+    }
+    func vincular(codigo: String, telefono: String) async throws {
+        let c: CarnetServidor = try await API.shared.rpc("app_vincular_carnet", ["p_codigo": codigo, "p_telefono": telefono])
+        carnet = c; fase = .listo; await refrescar()
+    }
+    func salir() async {
+        await API.shared.salir()
+        carnet = nil; pedidos = []; movimientos = []; fase = .invitado
+    }
+
+    // --- Pedido ---------------------------------------------------------------
     func agregar(_ l: LineaPedido) {
-        if let i = carrito.firstIndex(where: { $0.nombre == l.nombre && $0.detalle == l.detalle }) {
-            carrito[i].cantidad += l.cantidad
-        } else { carrito.append(l) }
+        if let i = carrito.firstIndex(where: { $0.item == l.item }) { carrito[i].cantidad += l.cantidad } else { carrito.append(l) }
         avisar("\(l.nombre) agregado")
     }
     func avisar(_ t: String) {
         withAnimation(.spring(duration: 0.3)) { aviso = t }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
-            withAnimation(.easeOut(duration: 0.25)) { if self?.aviso == t { self?.aviso = nil } }
-        }
+        Task { try? await Task.sleep(for: .seconds(1.8)); withAnimation(.easeOut(duration: 0.25)) { if aviso == t { aviso = nil } } }
     }
-    func confirmar() {
-        let total = aPagar
-        puntos -= Int(descuento)
-        pedido = PedidoEnCurso(folio: Int.random(in: 140...199), paso: 0, total: total, recoger: recoger, tienda: tienda,
-                               hora: hora, lineas: carrito, puntos: Int((total / Catalogo.montoPorPunto).rounded(.down)))
+    func confirmar() async throws {
+        guard let t = tienda else { throw ErrorAPI(mensaje: "Elige una tienda") }
+        let p: PedidoServidor = try await API.shared.rpc("app_crear_pedido", ["payload": [
+            "tienda": t.id, "modo": recoger ? "recoger" : "domicilio", "hora": hora, "usar_puntos": usarPuntos,
+            "items": carrito.map(\.payload)] as [String: Any]])
+        pedidos.insert(p, at: 0)
         carrito = []; usarPuntos = false
     }
-    func avanzar() {
-        guard var p = pedido, p.paso < 3 else { return }
-        p.paso += 1
-        if p.paso == 3 { puntos += p.puntos }
-        pedido = p
+    func cancelar(_ id: String) async throws {
+        let p: PedidoServidor = try await API.shared.rpc("app_cancelar_pedido", ["p_id": id])
+        if let i = pedidos.firstIndex(where: { $0.id == id }) { pedidos[i] = p }
     }
 }

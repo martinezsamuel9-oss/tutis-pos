@@ -570,6 +570,7 @@ function renderAll() {
   renderOrderRows();
   renderProductos();
   renderQuote();
+  iniciarPedidosApp();
   if (canManage()) {
     renderInventory();
     renderProductsTable();
@@ -4125,6 +4126,99 @@ $("btn-cmp-download").addEventListener("click", async () => {
     avisos.innerHTML = '<div class="alert bad">No se pudo sacar el libro de compras. Si sigue pasando, avísale a soporte técnico.</div>';
   } finally { btn.disabled = false; }
 });
+
+/* ===========================================================================
+   PEDIDOS DE LA APP (sql/17)
+   ---------------------------------------------------------------------------
+   Lo que piden los clientes desde el iPhone, para recoger. La caja los
+   consulta cada 15 s, avisa con un sonido cuando entra uno nuevo y los mueve
+   de estado (recibido → preparando → listo → entregado, o cancelado). La
+   base decide quién puede: solo el personal de esa tienda.
+   Un pedido NO es una venta: al entregarlo se cobra en Venta como siempre.
+   =========================================================================== */
+const PED = { lista: [], vistos: null, timer: null };
+const PED_ESTADOS = { recibido: "Recibido", preparando: "Preparando", listo: "Listo para recoger", entregado: "Entregado", cancelado: "Cancelado" };
+const PED_SIGUIENTE = { recibido: ["preparando", "Empezar a preparar"], preparando: ["listo", "Marcar listo"], listo: ["entregado", "Entregado"] };
+
+function sonarPedido() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [880, 1175].forEach((f, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.frequency.value = f; o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.0001, ctx.currentTime + i * 0.18);
+      g.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + i * 0.18 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + i * 0.18 + 0.16);
+      o.start(ctx.currentTime + i * 0.18); o.stop(ctx.currentTime + i * 0.18 + 0.18);
+    });
+  } catch (e) { /* sin sonido, sigue el aviso en pantalla */ }
+}
+
+async function cargarPedidosApp() {
+  if (!sb || !navigator.onLine || !STATE.activeLocationId) return;
+  const { data, error } = await sb.rpc("tienda_pedidos", { p_location_id: STATE.activeLocationId, p_dias: 1 });
+  if (error) { $("pedidos-aviso").innerHTML = '<div class="alert warn">No se pudieron cargar los pedidos de la app. Si sigue pasando, avísale a soporte técnico.</div>'; return; }
+  $("pedidos-aviso").innerHTML = "";
+  PED.lista = Array.isArray(data) ? data : [];
+  const nuevos = PED.lista.filter((p) => p.estado === "recibido");
+  if (PED.vistos && nuevos.some((p) => !PED.vistos.has(p.id))) sonarPedido();
+  PED.vistos = new Set(PED.lista.map((p) => p.id));
+  const badge = $("pedidos-badge");
+  badge.hidden = !nuevos.length; badge.textContent = nuevos.length;
+  pintarPedidosApp();
+}
+
+function pintarPedidosApp() {
+  const wrap = $("pedidos-lista");
+  if (!PED.lista.length) { wrap.innerHTML = '<p class="hint">Sin pedidos de la app por ahora. Esta pantalla se actualiza sola.</p>'; return; }
+  wrap.innerHTML = "";
+  PED.lista.forEach((p) => {
+    const card = document.createElement("article");
+    card.className = `pedido-app estado-${p.estado}`;
+    const lineas = (p.items || []).map((i) => {
+      const det = [(i.sabores || []).join(" + "), (i.toppings || []).join(", "), (i.premium || []).map((x) => x + " (premium)").join(", ")].filter(Boolean).join(" · ");
+      return `<li><strong>${esc(i.cantidad)} × ${esc(i.nombre)}</strong> <span class="num">${money(i.precio)}</span>${det ? `<div class="hint">${esc(det)}</div>` : ""}</li>`;
+    }).join("");
+    const hora = new Date(p.creado).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const sig = PED_SIGUIENTE[p.estado];
+    card.innerHTML = `
+      <header><span class="pedido-folio num">#${esc(p.folio)}</span><span class="estado-chip">${esc(PED_ESTADOS[p.estado] || p.estado)}</span></header>
+      <div class="pedido-cliente"><strong>${esc(p.cliente || "")}</strong> · carnet <span class="num">${esc(p.carnet || "")}</span></div>
+      <div class="hint">Pedido a las ${esc(hora)} · recoger ${p.hora === "ya" ? "lo antes posible" : "a las " + esc(p.hora)}${p.usar_puntos ? " · <strong>quiere usar sus puntos</strong>" : ""}</div>
+      <ul>${lineas}</ul>
+      <div class="pedido-total"><span>Total</span><strong class="num">${money(p.total)}</strong></div>
+      <div class="pedido-acciones"></div>`;
+    const acc = card.querySelector(".pedido-acciones");
+    if (sig) {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "btn primary touch-weigh"; b.textContent = sig[1];
+      b.addEventListener("click", () => moverPedidoApp(p, sig[0], b));
+      acc.appendChild(b);
+    }
+    if (["recibido", "preparando", "listo"].includes(p.estado)) {
+      const c = document.createElement("button");
+      c.type = "button"; c.className = "btn ghost touch-void"; c.textContent = "Cancelar";
+      c.addEventListener("click", () => { if (confirm(`¿Cancelar el pedido #${p.folio}? El cliente lo verá cancelado en su app.`)) moverPedidoApp(p, "cancelado", c); });
+      acc.appendChild(c);
+    }
+    wrap.appendChild(card);
+  });
+}
+
+async function moverPedidoApp(p, estado, boton) {
+  if (!navigator.onLine) { alert("Sin conexión: los pedidos de la app necesitan internet."); return; }
+  boton.disabled = true;
+  const { error } = await sb.rpc("tienda_pedido_estado", { p_id: p.id, p_estado: estado });
+  boton.disabled = false;
+  if (error) { alert(error.message && /no puede pasar|permiso/i.test(error.message) ? error.message : "No se pudo actualizar el pedido. Si sigue pasando, avísale a soporte técnico."); }
+  await cargarPedidosApp();
+}
+
+function iniciarPedidosApp() {
+  if (PED.timer) return;
+  cargarPedidosApp();
+  PED.timer = setInterval(() => { if (!document.hidden) cargarPedidosApp(); }, 15000);
+}
 
 /* ===========================================================================
    16. INSTALACION EN EL DISPOSITIVO (service worker)

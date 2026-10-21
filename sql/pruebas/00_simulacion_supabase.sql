@@ -14,6 +14,8 @@ create table if not exists auth.users (
   email text unique,
   raw_user_meta_data jsonb default '{}'::jsonb
 );
+-- Con qué proveedor entró (email, apple…). En Supabase lo llena Auth.
+alter table auth.users add column if not exists raw_app_meta_data jsonb default '{}'::jsonb;
 
 -- auth.uid() en Supabase lee el JWT; aquí lo simulamos con una variable de sesión
 create or replace function auth.uid() returns uuid

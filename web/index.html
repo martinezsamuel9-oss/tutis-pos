@@ -59,6 +59,7 @@
       <nav class="tabs" id="tabs">
         <button class="tab-btn" data-tab="dashboard" data-min-role="gerente">Dashboard</button>
         <button class="tab-btn active" data-tab="venta">Venta</button>
+        <button class="tab-btn" data-tab="pedidos" id="tab-btn-pedidos">Pedidos app <span class="tab-badge" id="pedidos-badge" hidden>0</span></button>
         <button class="tab-btn" data-tab="inventario" data-min-role="gerente">Inventario</button>
         <button class="tab-btn" data-tab="toppings" data-min-role="gerente">Toppings</button>
         <button class="tab-btn" data-tab="clientes" data-min-role="gerente">Clientes</button>
@@ -351,6 +352,16 @@
             </div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <!-- ===================== PEDIDOS DE LA APP ===================== -->
+    <section id="tab-pedidos" class="tab-panel">
+      <div class="card">
+        <h2>Pedidos de la app</h2>
+        <div class="sub">Los clientes piden desde su teléfono para recoger. Avanza cada pedido y el cliente ve el estado en su app. Al entregarlo, cóbralo aquí en Venta como siempre, con su carnet para que sume puntos.</div>
+        <div id="pedidos-aviso"></div>
+        <div class="pedidos-lista" id="pedidos-lista"></div>
       </div>
     </section>
 

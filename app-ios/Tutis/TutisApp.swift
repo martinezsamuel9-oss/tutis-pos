@@ -14,12 +14,14 @@ enum Pestana: Hashable { case inicio, pedir, regalar, puntos }
 
 struct Raiz: View {
     @Environment(Estado.self) private var estado
+    @Environment(\.scenePhase) private var fase
     @State private var pestana: Pestana = .inicio
     @State private var bienvenida = true
     @State private var verPedido = false
     @State private var verSeguimiento = false
 
     var body: some View {
+        @Bindable var estado = estado
         ZStack {
             pestanas
             if bienvenida { Bienvenida().transition(.opacity).zIndex(2) }
@@ -32,25 +34,35 @@ struct Raiz: View {
             }
         }
         .task {
-            try? await Task.sleep(for: .seconds(1.4))
+            async let carga: Void = estado.cargar()
+            try? await Task.sleep(for: .seconds(1.3))
             withAnimation(.easeOut(duration: 0.45)) { bienvenida = false }
+            await carga
         }
+        // Mientras haya un pedido en curso, su estado se consulta cada 10 s.
+        .task(id: estado.pedidoActivo?.id) {
+            while !Task.isCancelled, estado.pedidoActivo != nil {
+                try? await Task.sleep(for: .seconds(10))
+                await estado.refrescar()
+            }
+        }
+        .onChange(of: fase) { if fase == .active { Task { await estado.refrescar() } } }
         .sheet(isPresented: $verPedido) {
             CarritoView(alConfirmar: { verPedido = false; DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { verSeguimiento = true } })
                 .environment(estado)
         }
-        .sheet(isPresented: $verSeguimiento) { SeguimientoView().environment(estado).presentationDetents([.large]) }
+        .sheet(isPresented: $verSeguimiento) { SeguimientoView().environment(estado) }
+        .sheet(isPresented: $estado.pidiendoLogin) { LoginView().environment(estado) }
     }
 
     @ViewBuilder private var pestanas: some View {
         let tabs = TabView(selection: $pestana) {
-            Tab("Inicio", systemImage: "house.fill", value: .inicio) { NavigationStack { InicioView(irA: { pestana = $0 }) } }
-            Tab("Pedir", systemImage: "cup.and.saucer.fill", value: .pedir) { NavigationStack { PedirView() } }
-            Tab("Regalar", systemImage: "gift.fill", value: .regalar) { NavigationStack { RegalarView() } }
-            Tab("Puntos", systemImage: "star.fill", value: .puntos) { NavigationStack { PuntosView() } }
+            Tab(value: Pestana.inicio) { NavigationStack { InicioView(irA: { pestana = $0 }) } } label: { Label("Inicio", systemImage: "house.fill") }
+            Tab(value: Pestana.pedir) { NavigationStack { PedirView() } } label: { Label { Text("Pedir") } icon: { Image("helado") } }
+            Tab(value: Pestana.regalar) { NavigationStack { RegalarView() } } label: { Label("Regalar", systemImage: "gift.fill") }
+            Tab(value: Pestana.puntos) { NavigationStack { PuntosView() } } label: { Label("Puntos", systemImage: "star.fill") }
         }
         if #available(iOS 26.0, *) {
-            // La barra del pedido va pegada a la barra de pestañas de vidrio, como un reproductor mini.
             tabs.tabViewBottomAccessory { barraPedido }
         } else {
             tabs.safeAreaInset(edge: .bottom) { barraPedido.padding(.horizontal, 16).padding(.bottom, 4) }
@@ -68,11 +80,11 @@ struct Raiz: View {
                     Text(lempiras(estado.subtotal)).font(.system(size: 15, weight: .semibold)).monospacedDigit()
                 }.padding(.horizontal, 14).frame(maxWidth: .infinity, minHeight: 48)
             }.buttonStyle(.plain)
-        } else if let p = estado.pedido, p.paso < 3 {
+        } else if let p = estado.pedidoActivo {
             Button { verSeguimiento = true } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: "bag.fill").foregroundStyle(Color.magenta)
-                    Text("Pedido #\(p.folio) · \(SeguimientoView.etapa(p).titulo)").font(.display(15))
+                    Image("helado").foregroundStyle(Color.magenta)
+                    Text("Pedido #\(p.folio) · \(SeguimientoView.titulo(p.estado))").font(.display(15))
                     Spacer(); Image(systemName: "chevron.right").font(.system(size: 13, weight: .bold))
                 }.padding(.horizontal, 14).frame(maxWidth: .infinity, minHeight: 48)
             }.buttonStyle(.plain)

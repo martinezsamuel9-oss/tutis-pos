@@ -17,32 +17,36 @@ struct PedirView: View {
                     Text("Recoger").tag(true); Text("Domicilio").tag(false)
                 }.pickerStyle(.segmented).padding(.horizontal, 40).padding(.vertical, 12)
 
-                if estado.recoger { recoger } else { domicilio }
+                if let e = estado.errorMenu {
+                    ContentUnavailableView { Label("Sin conexión", systemImage: "wifi.slash") } description: { Text(e) } actions: {
+                        Button("Reintentar") { Task { await estado.cargar() } }.buttonStyle(BotonPildora())
+                    }
+                } else if estado.recoger || estado.aceptaDomicilio { recoger } else { domicilio }
             }
         }
         .background(Color.papel)
         .navigationTitle("Pedir").navigationBarTitleDisplayMode(.inline)
         .navigationDestination(for: Tienda.self) { _ in MenuView() }
         .task { await buscarTiendas() }
+        .refreshable { await estado.cargar() }
     }
 
     private var recoger: some View {
         VStack(alignment: .leading, spacing: 0) {
-            // Mapa de Apple con las tiendas de Tuti's que encuentre Apple Maps.
             Map(position: $camara) {
                 ForEach(lugares, id: \.self) { l in
                     Annotation(l.name ?? "Tuti's", coordinate: l.placemark.coordinate) {
-                        Image(systemName: "cup.and.saucer.fill").font(.system(size: 14, weight: .bold)).foregroundStyle(.white)
+                        Image("helado").renderingMode(.template).foregroundStyle(.white)
                             .frame(width: 32, height: 32).background(Color.magenta, in: Circle())
                             .overlay(Circle().stroke(.white, lineWidth: 2))
                     }
                 }
-                UserAnnotation()
             }
             .frame(height: 260)
             .overlay { if lugares.isEmpty { Text("Buscando tiendas en el mapa…").font(.system(size: 14)).foregroundStyle(Color.tinta2).padding(10).background(.thinMaterial, in: Capsule()) } }
 
-            ForEach(Catalogo.tiendas) { t in
+            if estado.tiendas.isEmpty { ProgressView().frame(maxWidth: .infinity).padding(30) }
+            ForEach(estado.tiendas) { t in
                 NavigationLink(value: t) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 6) {
@@ -51,16 +55,16 @@ struct PedirView: View {
                                 .foregroundStyle(abierta ? Color.verde : Color.rojo)
                                 .background(abierta ? Color.verdeFondo : Color.rojoFondo, in: RoundedRectangle(cornerRadius: 8))
                             Text(t.nombre.replacingOccurrences(of: "Tuti's ", with: "")).font(.display(22)).foregroundStyle(Color.tinta)
-                            Text(t.lugar).foregroundStyle(Color.tinta2)
-                            Text("Listo en \(t.minutos) min").font(.system(size: 14)).foregroundStyle(Color.tinta2)
+                            if !t.lugar.isEmpty { Text(t.lugar).foregroundStyle(Color.tinta2) }
+                            Text("Listo en unos \(t.minutos) min").font(.system(size: 14)).foregroundStyle(Color.tinta2)
                         }
                         Spacer()
-                        Image(systemName: "info.circle").font(.system(size: 24, weight: .light)).foregroundStyle(Color.tinta2)
+                        if estado.tiendaId == t.id { Image(systemName: "checkmark.circle.fill").font(.system(size: 24)).foregroundStyle(Color.magenta) }
                     }
                     .padding(.vertical, 18).padding(.horizontal, 20).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .simultaneousGesture(TapGesture().onEnded { estado.tienda = t })
+                .simultaneousGesture(TapGesture().onEnded { estado.tiendaId = t.id })
                 Divider().padding(.leading, 20)
             }
             Text("Horario de ejemplo. Los pines salen de Apple Maps; si una tienda no aparece, hay que darla de alta en Apple Business Connect.")
@@ -76,10 +80,9 @@ struct PedirView: View {
                 Foto(nombre: "vainilla").frame(width: 210, height: 220).clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
                     .shadow(color: .black.opacity(0.2), radius: 16, y: 8).padding(.bottom, 10)
             }.clipped()
-            Text("Hoy se antoja a domicilio").font(.titular(30)).multilineTextAlignment(.center)
-            NavigationLink(value: estado.tienda) { Text("Empezar") }.buttonStyle(BotonPildora())
-            Text("Envío L 50 de ejemplo. Falta decidir zonas y si entregan repartidores propios o PedidosYa/Hugo, y hasta qué distancia llega sin derretirse.")
-                .font(.system(size: 14)).foregroundStyle(Color.tinta2).multilineTextAlignment(.center).padding(.horizontal, 30)
+            Text("A domicilio, muy pronto").font(.titular(30)).multilineTextAlignment(.center)
+            Text("Por ahora los pedidos son para recoger en tienda. Estamos definiendo las zonas de entrega para que tu yogurt llegue perfecto.")
+                .font(.system(size: 15)).foregroundStyle(Color.tinta2).multilineTextAlignment(.center).padding(.horizontal, 30)
         }
     }
 
@@ -98,20 +101,27 @@ struct MenuView: View {
     @Environment(Estado.self) private var estado
     @State private var categoria = "tazas"
 
+    private var categorias: [(id: String, nombre: String, detalle: String, foto: String)] {
+        [("tazas", "Tazas de yogurt", "Arma la tuya", "taro")] +
+        estado.familias.map { ($0, $0 == "Toppings" ? "Toppings para llevar" : $0, $0 == "Temporada" ? "Por tiempo limitado" : "En porción", Catalogo.fotoFamilia($0)) }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Etiqueta(texto: estado.recoger ? "Recoger en" : "Domicilio desde")
-                        Text(estado.tienda.nombre).font(.display(17)).foregroundStyle(Color.tinta)
-                    }
-                    Spacer()
-                    Text("\(estado.tienda.minutos) min").font(.system(size: 14)).foregroundStyle(Color.tinta2)
-                }.padding(16).background(Color.superficie, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                if let t = estado.tienda {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Etiqueta(texto: "Recoger en")
+                            Text(t.nombre).font(.display(17)).foregroundStyle(Color.tinta)
+                        }
+                        Spacer()
+                        Text("Unos \(t.minutos) min").font(.system(size: 14)).foregroundStyle(Color.tinta2)
+                    }.padding(16).background(Color.superficie, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                }
 
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                    ForEach(Catalogo.categorias) { c in
+                    ForEach(categorias, id: \.id) { c in
                         Button { withAnimation { categoria = c.id } } label: {
                             ZStack(alignment: .bottomLeading) {
                                 Foto(nombre: c.foto).frame(height: 176).frame(maxWidth: .infinity).clipped()
@@ -128,18 +138,18 @@ struct MenuView: View {
                 }
 
                 if categoria == "tazas" {
-                    ForEach(Array(Catalogo.tamanos.enumerated()), id: \.offset) { i, t in
+                    ForEach(Array(estado.tamanos.enumerated()), id: \.offset) { i, t in
                         NavigationLink { TazaView(tamanoInicial: t) } label: {
-                            fila(nombre: "Taza \(t.nombre.lowercased()) · \(t.oz) oz", detalle: "Hasta 3 sabores y \(t.toppings) toppings", precio: t.precio, foto: ["vainilla", "fresa", "taro"][i])
+                            fila(nombre: "Taza \(t.nombre.lowercased()) · \(t.oz) oz", detalle: "Hasta 3 sabores y \(t.toppings) toppings", precio: t.precio, foto: ["vainilla", "fresa", "taro"][i % 3])
                         }.buttonStyle(.plain)
                     }
                     Text("Precios de ejemplo. Hoy la taza se cobra por peso; para la app hacen falta tamaños con precio fijo.")
                         .font(.system(size: 13)).foregroundStyle(Color.tinta2).padding(12).background(Color.hundido, in: RoundedRectangle(cornerRadius: 14))
                 } else {
-                    ForEach(Catalogo.productos.filter { $0.categoria == categoria }) { p in
-                        Button { estado.agregar(LineaPedido(nombre: p.nombre, precio: p.precio, foto: p.foto, detalle: "", cantidad: 1)) } label: {
-                            fila(nombre: p.nombre, detalle: p.detalle, precio: p.precio, foto: p.foto)
-                        }.buttonStyle(.plain)
+                    ForEach(estado.productos.filter { $0.tienda == estado.tienda?.id && $0.familia == categoria }) { p in
+                        Button {
+                            estado.agregar(LineaPedido(nombre: p.nombre, precio: p.precio, foto: Catalogo.fotoProducto(p.nombre), detalle: "", cantidad: 1, item: .producto(id: p.id)))
+                        } label: { fila(nombre: p.nombre, detalle: p.familia, precio: p.precio, foto: Catalogo.fotoProducto(p.nombre)) }.buttonStyle(.plain)
                     }
                 }
             }.padding(20)

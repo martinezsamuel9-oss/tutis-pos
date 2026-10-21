@@ -49,6 +49,11 @@
           ? { data: { ok: true, id: "AUTH-H", authorized_by_name: "Gerente Galerías" }, error: null }
           : { data: null, error: { message: "Para autorizar con huella hay que confirmarla en el teléfono en ese momento", code: "P0001" } };
       case "tengo_pin": return { data: false, error: null };
+      case "tienda_pedidos": return { data: JSON.parse(localStorage.getItem("fake_pedidos_app") || "[]"), error: null };
+      case "tienda_pedido_estado": {
+        const l = JSON.parse(localStorage.getItem("fake_pedidos_app") || "[]"); const x = l.find((p) => p.id === args.p_id);
+        if (x) x.estado = args.p_estado; localStorage.setItem("fake_pedidos_app", JSON.stringify(l)); return { data: x, error: null };
+      }
       case "daily_closing": return { data: { ventas: 3, ingresos: 250.5, vasos: 3, cucharas: 3, peso_helado_g: 450, peso_toppings_g: 90, toppings: [],
         por_pago: [{ metodo: "efectivo", ventas: 2, total: 170.5 }, { metodo: "tarjeta", ventas: 1, total: 80 }], descuentos: 10, anulaciones: 1, anulado_g: 185.5,
         vouchers: [{ folio: 7, hora: "2026-10-21T18:00:00Z", total: 80, autorizacion: "123456", ultimos4: "4321" },
