@@ -1,0 +1,96 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+		D2A57DC1D883FD21FB995169 /* Tutis.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Tutis.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9FBE2661C5E16CB142FAED9A /* Tutis */ = {isa = PBXFileSystemSynchronizedRootGroup; path = Tutis; sourceTree = "<group>"; };
+		8F51EF3B9040A527832BEBBA = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		FAD58DE7366495DB4650CFEF = {isa = PBXGroup; children = (9FBE2661C5E16CB142FAED9A, D6E4A9B6646C62FC48BAA6DD); sourceTree = "<group>"; };
+		D6E4A9B6646C62FC48BAA6DD /* Products */ = {isa = PBXGroup; children = (D2A57DC1D883FD21FB995169); name = Products; sourceTree = "<group>"; };
+		42AEFBAE01D2DFD981F7DA7D /* Tutis */ = {isa = PBXNativeTarget; buildConfigurationList = 7B90BB0BCEC1B76ED371DFC4; buildPhases = (25D902C24283AB8CFBAC54DF, 8F51EF3B9040A527832BEBBA, 9B207167E5381C47682C6B4F); buildRules = (); dependencies = (); fileSystemSynchronizedGroups = (9FBE2661C5E16CB142FAED9A); name = Tutis; packageProductDependencies = (); productName = Tutis; productReference = D2A57DC1D883FD21FB995169; productType = "com.apple.product-type.application"; };
+		25D902C24283AB8CFBAC54DF = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		9B207167E5381C47682C6B4F = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		4DC844ABCCFC0D132D087C1C /* Project object */ = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 2710; LastUpgradeCheck = 2710; TargetAttributes = {42AEFBAE01D2DFD981F7DA7D = {CreatedOnToolsVersion = 27.1; }; }; }; buildConfigurationList = D766599C7DEFAE129FEB27F2; developmentRegion = es; hasScannedForEncodings = 0; knownRegions = (es, Base); mainGroup = FAD58DE7366495DB4650CFEF; minimizedProjectReferenceProxies = 1; preferredProjectObjectVersion = 77; productRefGroup = D6E4A9B6646C62FC48BAA6DD; projectDirPath = ""; projectRoot = ""; targets = (42AEFBAE01D2DFD981F7DA7D); };
+		0DC8EC404A26DC9E7EEA7A4B /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 95P9N796G9;
+				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 0.1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Tuti's";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.slabblu.tutis.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				ENABLE_PREVIEWS = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			}; name = Debug; };
+		F54EC26E2147B7D2ED5C0D52 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = 95P9N796G9;
+				CURRENT_PROJECT_VERSION = 1;
+				MARKETING_VERSION = 0.1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Tuti's";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				PRODUCT_BUNDLE_IDENTIFIER = com.slabblu.tutis.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				ENABLE_PREVIEWS = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			}; name = Release; };
+		8EB0A40520C886C86AE2C430 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				SDKROOT = iphoneos;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				GCC_OPTIMIZATION_LEVEL = 0;
+			}; name = Debug; };
+		A5F9469A2DA3A61537912AC6 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				SDKROOT = iphoneos;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				VALIDATE_PRODUCT = YES;
+			}; name = Release; };
+		7B90BB0BCEC1B76ED371DFC4 = {isa = XCConfigurationList; buildConfigurations = (0DC8EC404A26DC9E7EEA7A4B, F54EC26E2147B7D2ED5C0D52); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		D766599C7DEFAE129FEB27F2 = {isa = XCConfigurationList; buildConfigurations = (8EB0A40520C886C86AE2C430, A5F9469A2DA3A61537912AC6); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+	};
+	rootObject = 4DC844ABCCFC0D132D087C1C /* Project object */;
+}
