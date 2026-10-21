@@ -495,8 +495,8 @@ precios las define ella; Samuel lleva el sistema):
   - **CTH**: materia prima que entra **desde bodega** (hay una bodega
     central que surte a las tiendas).
   - **011C / 021C**: materia prima comprada y recibida directo por cada
-    tienda, y cada tienda la ingresa. Falta confirmar cuál código es de
-    cuál tienda (probable: 011C Galerías, 021C Multiplaza).
+    tienda, y cada tienda la ingresa. **011C = Galerías, 021C = Multiplaza**
+    (confirmado 2026-10-21; ya puesto en `locations.purchase_series`).
 
 ### 5.2 Libro de ventas en formato ICG
 
