@@ -417,6 +417,25 @@ Se enciende con `PASSKEYS: true` en `config.js`. Lo que no hay que deshacer:
 5. Necesita internet y Bluetooth en la computadora de la caja (el teléfono
    se enlaza por QR + Bluetooth). Sin eso queda el PIN.
 
+## 3.6 Pantalla de venta táctil
+
+Pedido del dueño (2026-10-21), con el video de la caja de ICG como modelo: en
+la venta todo se toca con el dedo. Lo que no hay que deshacer:
+
+1. **Cuadros grandes, no listas.** Vaso, cuchara (con "Sin cuchara"), sabor y
+   forma de pago son cuadros de 72 px o más; los toppings, cuadros del color
+   de su familia (dulce amarillo, maní café, salsa rojo, jalea morado…) con
+   el nombre de la familia escrito, porque el color solo no basta.
+2. **Los `<select>` siguen existiendo, ocultos (`.tile-source`), y son la
+   fuente de la verdad**: el cálculo, el pedido guardado y las pruebas los
+   leen. `pintarCuadros()` solo los cambia y dispara "change". Si el select
+   está deshabilitado (el vaso ya pesado), los cuadros también.
+3. **Cobrar y el total quedan siempre a la vista** (barra pegada abajo en el
+   ticket, pantallas de 900 px o más). La línea de Total del ticket puede
+   quedar fuera de la vista; el total grande junto al botón no.
+4. **Cada venta arranca en Efectivo.** Si no, una "Tarjeta" de la venta
+   anterior se colaría en el cuadre por forma de pago.
+
 ## 4. Restricciones permanentes (pedidas explícitamente)
 
 - **NUNCA incluir el sitio web `https://tutis.innova504.com/` en la factura o

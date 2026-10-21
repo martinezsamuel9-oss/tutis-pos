@@ -51,9 +51,16 @@ const texto = (page, sel) => page.locator(sel).innerText();
   ok(await page.locator("#inp-ice-weight").isHidden(), "2 el peso del helado NO es un campo editable");
   ok(await page.locator("#inp-cup-weight").count() === 0, "2b la tara del vaso ya no se teclea");
   ok((await texto(page, "#cup-tare-hint")).includes("15"), "2c la tara sale del catálogo (15 g)");
+  // Pantalla táctil: todo se elige tocando cuadros grandes, no listas.
+  const altoCuadro = (await page.locator("#tiles-cup .tile").first().boundingBox()).height;
+  ok(altoCuadro >= 72 && (await page.locator("#sel-cup").isHidden()), "2d el vaso se elige con cuadros de al menos 72 px, sin lista desplegable", altoCuadro);
+  await page.click('#tiles-spoon .tile:has-text("Sin cuchara")');
+  ok(!(await page.isChecked("#chk-spoon")) && !(await texto(page, "#ticket-lines")).includes("Cuchara"), "2e 'Sin cuchara' la quita del ticket");
+  await page.click('#tiles-spoon .tile:has-text("Cuchara")');
+  ok(await page.isChecked("#chk-spoon"), "2f tocar una cuchara la vuelve a incluir");
 
   // Topping antes del helado: no.
-  await page.click("#topping-chips .chip");
+  await page.click("#topping-chips .tile");
   await page.click("#order-rows .order-row button.btn");
   ok((await texto(page, "#scale-status")).includes("Primero pesa el helado"), "3 no deja pesar un topping antes que el helado");
 
@@ -64,7 +71,8 @@ const texto = (page, sel) => page.locator(sel).innerText();
   await page.waitForFunction(() => document.querySelector("#out-ice-weight").textContent.includes("150"));
   ok(true, "4 Pesar helado: 165 − 15 de tara = 150 g");
   ok(await page.locator("#btn-weigh-ice").isHidden(), "4b el botón de pesar helado desaparece: ya quedó fijo");
-  ok(await page.locator("#sel-cup").isDisabled(), "4c ya no se puede cambiar el vaso (cambiaría la tara)");
+  ok(await page.locator("#sel-cup").isDisabled() && (await page.locator("#tiles-cup .tile:not([disabled])").count()) === 0,
+     "4c ya no se puede cambiar el vaso, ni con los cuadros (cambiaría la tara)");
   ok(!!(await page.evaluate(() => localStorage.getItem("tutis_pedido_en_curso"))), "4d el pedido en curso quedó guardado en el navegador");
 
   // Topping: la báscula sube a 195, primero moviéndose.
@@ -81,10 +89,13 @@ const texto = (page, sel) => page.locator(sel).innerText();
   const total = await texto(page, "#ticket-totals .tt-total");
   ok(total.includes("87.75"), "6 150 g + 30 g + vaso 15 g a 0.45/g = 87.75", total);
 
+  ok((await texto(page, "#charge-total")).includes("87.75"), "6b el total también está junto al botón de cobrar");
+  await page.click('#tiles-payment .tile:has-text("Tarjeta")');
   await page.click("#btn-charge");
   await page.waitForSelector("#receipt-modal:not([hidden])");
   const venta = (await rpcs(page, "process_sale")).pop();
   const p = venta && venta.args.payload;
+  ok(p && p.payment_method === "tarjeta", "6c la forma de pago se elige con un cuadro y viaja en la venta", p && p.payment_method);
   ok(p && p.weight_mode === "bascula" && Math.abs(p.scale_gross_g - 195) < 0.01 && p.scale_log.length === 2,
      "7 la venta lleva modo báscula, la lectura bruta (195 g) y las dos lecturas", p && { m: p.weight_mode, g: p.scale_gross_g, n: p.scale_log && p.scale_log.length });
   ok(p && p.scale_log[0].crudo.includes("KG") && p.scale_log[0].crudo.includes("<ETX>") === false,
@@ -94,6 +105,8 @@ const texto = (page, sel) => page.locator(sel).innerText();
   ok(!(await page.evaluate(() => localStorage.getItem("tutis_pedido_en_curso"))), "7d al cobrar se borra el pedido en curso");
   await page.click("#btn-close-receipt");
   ok(await page.locator("#btn-weigh-ice").isVisible() && !(await page.locator("#sel-cup").isDisabled()), "7e la siguiente venta arranca limpia");
+  ok((await page.inputValue("#sel-payment")) === "efectivo" && (await page.getAttribute('#tiles-payment .tile:has-text("Efectivo")', "aria-checked")) === "true",
+     "7f y vuelve a Efectivo: una tarjeta de la venta anterior no se cuela en el cuadre");
 
   // TARA puesta en la báscula.
   await ponerBascula(page, { g: 150, tara: true });
@@ -132,7 +145,7 @@ const texto = (page, sel) => page.locator(sel).innerText();
   await page.click("#btn-manual-mode");
   ok(await page.locator("#inp-ice-weight").isVisible() && await page.locator("#manual-banner").isVisible(), "11 modo a mano: aparecen los campos y el aviso");
   await page.fill("#inp-ice-weight", "150");
-  await page.click("#topping-chips .chip");
+  await page.click("#topping-chips .tile");
   await page.fill("#order-rows .order-row input", "30");
   await page.click("#btn-charge");
   await page.waitForSelector("#pin-modal:not([hidden])");
@@ -237,7 +250,7 @@ const texto = (page, sel) => page.locator(sel).innerText();
   page.once("dialog", (d) => d.accept());
   await page.click("#btn-manual-mode");
   await page.fill("#inp-ice-weight", "150");
-  await page.click("#topping-chips .chip");
+  await page.click("#topping-chips .tile");
   await page.fill("#order-rows .order-row input", "30");
   await page.click("#btn-charge");
   await page.waitForSelector("#pin-modal:not([hidden])");

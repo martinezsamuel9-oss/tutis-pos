@@ -674,6 +674,57 @@ function fillSaleSelectors() {
         : `Precio único: ${money(loc.price_per_gram)} por gramo`)
     : "";
   pintarTara();
+  pintarCuadrosVenta();
+}
+
+/* --- Cuadros táctiles ---------------------------------------------------------
+   En la caja se toca con el dedo, como en ICG: cada opción es un cuadro grande.
+   Los <select> siguen ahí (ocultos) y son la fuente de la verdad: el cálculo,
+   el pedido guardado y las pruebas los leen. Un cuadro solo cambia el select y
+   avisa con "change", así que nada de la lógica de venta cambió.
+   Si el select está deshabilitado (el vaso, una vez pesado), los cuadros también. */
+function pintarCuadros(selectId, cuadrosId, opciones = {}) {
+  const sel = $(selectId), wrap = $(cuadrosId);
+  if (!sel || !wrap) return;
+  const extra = opciones.extra || [];
+  const items = [...sel.options].map((o) => ({ value: o.value, label: o.textContent, sub: (opciones.sub || (() => ""))(o.value) }));
+  wrap.innerHTML = "";
+  [...items, ...extra].forEach((it) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "tile";
+    b.setAttribute("role", "radio");
+    const activo = it.activo ? it.activo() : (sel.value === it.value && !(opciones.apagado && opciones.apagado()));
+    b.setAttribute("aria-checked", String(!!activo));
+    b.disabled = sel.disabled;
+    b.innerHTML = `<span class="tile-name">${esc(it.label)}</span>${it.sub ? `<span class="tile-sub">${esc(it.sub)}</span>` : ""}`;
+    b.addEventListener("click", () => {
+      if (it.click) it.click();
+      else {
+        sel.value = it.value;
+        if (opciones.alElegir) opciones.alElegir();
+        sel.dispatchEvent(new Event("change"));
+      }
+      pintarCuadrosVenta();
+    });
+    wrap.appendChild(b);
+  });
+}
+
+function pintarCuadrosVenta() {
+  pintarCuadros("sel-cup", "tiles-cup", {
+    sub: (id) => { const c = STATE.supplies.find((x) => x.id === id); return c ? `tara ${fmtWeightShort(Number(c.tare_weight_g) || 0)}` : ""; },
+  });
+  const spoon = $("chk-spoon");
+  pintarCuadros("sel-spoon", "tiles-spoon", {
+    apagado: () => !spoon.checked,
+    // Elegir una cuchara la vuelve a incluir.
+    alElegir: () => { spoon.checked = true; },
+    extra: [{ label: "Sin cuchara", activo: () => !spoon.checked,
+              click: () => { spoon.checked = false; spoon.dispatchEvent(new Event("change")); } }],
+  });
+  pintarCuadros("sel-flavor", "tiles-flavor");
+  pintarCuadros("sel-payment", "tiles-payment");
 }
 
 // La unidad de la tienda solo importa para teclear a mano; lo que viene de
@@ -700,14 +751,20 @@ $("sel-cup").addEventListener("change", () => { pintarTara(); renderQuote(); });
 $("inp-ice-weight").addEventListener("input", renderQuote);
 ["sel-flavor", "sel-spoon", "chk-spoon"].forEach((id) => $(id).addEventListener("change", renderQuote));
 
+// Cada familia de toppings con su color, como las familias de ICG. El color
+// solo ayuda a ubicarse: el nombre y la familia siempre van escritos.
+const FAMILIAS_TOPPING = ["dulce", "mani", "salsa", "jalea", "fruta", "cereal", "otro"];
 function renderToppingChips() {
   const wrap = $("topping-chips");
   wrap.innerHTML = "";
-  STATE.toppings.forEach((t) => {
+  const orden = (c) => { const i = FAMILIAS_TOPPING.indexOf(c); return i < 0 ? 99 : i; };
+  STATE.toppings.slice().sort((a, b) => orden(a.category) - orden(b.category) || String(a.name).localeCompare(String(b.name))).forEach((t) => {
     const chip = document.createElement("button");
     chip.type = "button";
-    chip.className = "chip" + (t.tier === 2 ? " tier2" : "");
-    chip.innerHTML = `${esc(t.name)}<span class="chip-cat">${esc(t.category)}</span>`;
+    const fam = FAMILIAS_TOPPING.includes(t.category) ? t.category : "otro";
+    chip.className = `tile topping-tile fam-${fam}` + (t.tier === 2 ? " tier2" : "");
+    chip.innerHTML = `<span class="tile-name">${esc(t.name)}</span><span class="tile-sub">${esc(t.category === "mani" ? "maní" : t.category)}</span>` +
+      (t.tier === 2 ? `<span class="tile-badge">premium</span>` : "");
     chip.addEventListener("click", () => {
       orderRows.push({ rowId: "r" + Date.now() + Math.random(), toppingId: t.id, weight: 0, unit: prefUnit(), pesadoG: null });
       renderOrderRows(); renderQuote();
@@ -752,7 +809,7 @@ function renderOrderRows() {
       peso.textContent = row.pesadoG == null ? "—" : fmtWeightShort(row.pesadoG);
       if (row.pesadoG == null) {
         accion = document.createElement("button");
-        accion.type = "button"; accion.className = "btn primary small"; accion.textContent = "⚖ Pesar";
+        accion.type = "button"; accion.className = "btn primary touch-weigh"; accion.textContent = "⚖ Pesar";
         accion.addEventListener("click", () => pesar("topping", row, accion));
       } else {
         accion = document.createElement("span");
@@ -896,6 +953,9 @@ function limpiarPedido() {
   PESO.heladoG = 0;
   orderRows.length = 0;
   $("inp-ice-weight").value = "";
+  // Cada venta arranca en efectivo, como en ICG: así una tarjeta de la venta
+  // anterior no se cuela en el cuadre de la siguiente.
+  $("sel-payment").value = "efectivo";
   try { localStorage.removeItem(LS_PEDIDO); } catch (e) {}
   pintarModo();
   renderOrderRows();
@@ -968,6 +1028,7 @@ function pintarModo() {
   $("out-ice-weight").classList.toggle("locked", PESO.heladoG > 0);
   // Con algo ya pesado, la tara no puede cambiar: cambiaría lo que se cobra.
   $("sel-cup").disabled = !manual && PESO.capturas.length > 0;
+  pintarCuadrosVenta();
   $("weigh-hint").innerHTML = manual
     ? "Teclea los pesos. Al cobrar, una gerente los revisa y autoriza con su PIN."
     : "Pon el vaso con el helado en la báscula y presiona <strong>Pesar</strong>. Lo pesado queda fijo.";
@@ -1247,6 +1308,7 @@ function renderQuote() {
   if (!plan) {
     linesEl.innerHTML = '<p class="hint">Selecciona vaso y sabor para empezar.</p>';
     totalsEl.innerHTML = ""; alertsEl.innerHTML = "";
+    pintarTotalCobro(null);
     return;
   }
 
@@ -1288,9 +1350,17 @@ function renderQuote() {
   alertsEl.innerHTML = alerts.map((a) => `<div class="alert warn">${esc(a)}</div>`).join("");
 }
 
+// El total, grande junto al botón de cobrar: con el ticket largo, la línea de
+// Total puede quedar fuera de la vista, y es lo que la cajera le dice al cliente.
+function pintarTotalCobro(monto, etiqueta) {
+  $("charge-total-label").textContent = etiqueta || "Total";
+  $("charge-total").textContent = monto == null ? "—" : money(monto);
+}
+
 function pintarPreviaPuntos(p, totalLista) {
   const el = $("ticket-totals");
   el.querySelectorAll(".tt-discount, .tt-points, .tt-pay").forEach((n) => n.remove());
+  pintarTotalCobro(p && p.descuento > 0 ? p.pagado : totalLista, p && p.descuento > 0 ? "A cobrar" : "Total");
   if (!p) return;
   if (p.descuento > 0) {
     el.insertAdjacentHTML("beforeend",

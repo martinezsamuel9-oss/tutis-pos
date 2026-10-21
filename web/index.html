@@ -231,19 +231,25 @@
             <h2>Vaso, cuchara y helado</h2>
             <div class="sub" id="weigh-hint">Pon el vaso con el helado en la báscula y presiona <strong>Pesar</strong>. Lo pesado queda fijo.</div>
 
-            <div class="field"><label>Vaso</label><select id="sel-cup"></select></div>
+            <!-- Los select siguen siendo la fuente de la verdad (los usa el cálculo);
+                 en pantalla se tocan los cuadros, pensados para pantalla táctil. -->
+            <div class="tile-label">Vaso</div>
+            <select id="sel-cup" class="tile-source" aria-hidden="true" tabindex="-1"></select>
+            <div class="tiles" id="tiles-cup" role="radiogroup" aria-label="Vaso"></div>
             <p class="hint" id="cup-tare-hint"></p>
-            <div class="field">
-              <label class="check"><input type="checkbox" id="chk-spoon" checked> Incluir cuchara</label>
-              <select id="sel-spoon"></select>
-            </div>
-            <div class="field"><label>Sabor de helado</label><select id="sel-flavor"></select></div>
+            <div class="tile-label">Cuchara</div>
+            <input type="checkbox" id="chk-spoon" class="tile-source" checked aria-hidden="true" tabindex="-1">
+            <select id="sel-spoon" class="tile-source" aria-hidden="true" tabindex="-1"></select>
+            <div class="tiles" id="tiles-spoon" role="radiogroup" aria-label="Cuchara"></div>
+            <div class="tile-label">Sabor de helado</div>
+            <select id="sel-flavor" class="tile-source" aria-hidden="true" tabindex="-1"></select>
+            <div class="tiles" id="tiles-flavor" role="radiogroup" aria-label="Sabor de helado"></div>
             <div class="field weigh-field">
               <label>Peso del helado</label>
               <output class="weigh-value num" id="out-ice-weight">—</output>
               <input type="number" id="inp-ice-weight" min="0" step="0.1" placeholder="0" hidden>
               <div class="unit-seg" id="unit-ice" hidden><button class="active" data-unit="g">g</button><button data-unit="oz">oz</button></div>
-              <button class="btn primary small" id="btn-weigh-ice" type="button">⚖ Pesar</button>
+              <button class="btn primary touch-weigh" id="btn-weigh-ice" type="button">⚖ Pesar</button>
             </div>
           </div>
 
@@ -256,7 +262,7 @@
         </div>
 
         <div>
-          <div class="card">
+          <div class="card ticket-card">
             <h2>Ticket</h2>
             <div class="sub" id="price-per-gram-hint"></div>
             <div class="ticket" id="ticket-lines"></div>
@@ -305,21 +311,25 @@
               </div>
             </div>
 
-            <details open style="margin-top:12px;">
-              <summary style="cursor:pointer; font-weight:700; font-size:0.9rem;">Datos de venta</summary>
+            <div class="tile-label" style="margin-top:14px;">Forma de pago</div>
+            <select id="sel-payment" class="tile-source" aria-hidden="true" tabindex="-1">
+              <option value="efectivo">Efectivo</option>
+              <option value="tarjeta">Tarjeta</option>
+              <option value="transferencia">Transferencia</option>
+            </select>
+            <div class="tiles tiles-pay" id="tiles-payment" role="radiogroup" aria-label="Forma de pago"></div>
+
+            <details class="sale-data">
+              <summary>Factura a nombre de un cliente (RTN)</summary>
               <div class="field stack" style="margin-top:10px;"><label>Cliente</label><input type="text" id="inp-customer-name" placeholder="Consumidor final"></div>
-              <div class="field stack"><label>NIT / DUI / RTN</label><input type="text" id="inp-customer-taxid"></div>
-              <div class="field stack"><label>Pago</label>
-                <select id="sel-payment">
-                  <option value="efectivo">Efectivo</option>
-                  <option value="tarjeta">Tarjeta</option>
-                  <option value="transferencia">Transferencia</option>
-                </select>
-              </div>
+              <div class="field stack"><label>NIT / DUI / RTN</label><input type="text" id="inp-customer-taxid" inputmode="numeric"></div>
             </details>
 
-            <button class="btn accent block big" id="btn-charge" style="margin-top:14px;">Cobrar y registrar venta</button>
-            <button class="btn ghost block" id="btn-void-order" type="button" style="margin-top:8px;">Anular pedido</button>
+            <div class="charge-bar">
+              <div class="charge-total" aria-live="polite"><span id="charge-total-label">Total</span><strong class="num" id="charge-total">—</strong></div>
+              <button class="btn accent block touch-charge" id="btn-charge">Cobrar y registrar venta</button>
+              <button class="btn ghost block touch-void" id="btn-void-order" type="button">Anular pedido</button>
+            </div>
           </div>
         </div>
       </div>
