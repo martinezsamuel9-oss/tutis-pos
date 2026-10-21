@@ -66,6 +66,8 @@ sql/10_peso_fijo.sql        el peso lo pone la báscula: PIN de gerente, autoriz
                             clasificación de cada venta y pedidos anulados
 sql/11_huella.sql           autorizar con la huella del teléfono de la gerente (passkeys)
 sql/12_compras_y_cierre.sql libro de compras (purchases), cierre por forma de pago y funciones de respaldo
+sql/13_privilegios.sql      quita TRUNCATE, TRIGGER, REFERENCES y MAINTAIN (PG17) a anon y authenticated,
+                            también para las tablas futuras (TRUNCATE se salta RLS)
 cierre-diario/      Worker programado: manda el cierre y respalda la base en R2 (ver su LEEME.md)
 wallet/             Worker de pases de Apple/Google Wallet en wallet.slabblu.com (ver su LEEME.md)
 wallet/secretos/    llave y certificado de Apple — GITIGNORADO, nunca al repo
@@ -310,6 +312,13 @@ Lo que salió de ahí y NO se debe deshacer:
 
 6. **El SDK de Supabase se mantiene al día** (`web/vendor/`). La versión 2.45.4
    con la que arrancó el proyecto tenía un aviso de seguridad en `auth-js`.
+
+7. **anon y authenticated no tienen TRUNCATE, TRIGGER, REFERENCES ni
+   MAINTAIN** (`sql/13_privilegios.sql`), tampoco en las tablas que se creen
+   después. Supabase los da por defecto; TRUNCATE vacía una tabla sin pasar
+   por RLS y LOCK TABLE (MAINTAIN) puede congelar las cajas. Una tabla nueva
+   creada con otro rol que no sea `postgres` no hereda esto: volver a correr
+   el 13.
 
 ## 3.3 El cierre automático por correo
 
@@ -565,6 +574,7 @@ grep -v "create extension if not exists pg_net" sql/09_wallet_avisos.sql | psql 
 psql -h /tmp/pg -p 5433 -U postgres -f sql/10_peso_fijo.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/11_huella.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/12_compras_y_cierre.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/13_privilegios.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_aislamiento.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_seguridad.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_fidelizacion.sql
