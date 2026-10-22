@@ -2181,6 +2181,11 @@ function fillConfigForm() {
   $("cfg-margin-target").value = c.margin_target_pct;
   $("cfg-report-email").value = c.report_email || "";
   $("cfg-weight-unit").value = c.default_weight_unit || "g";
+  $("cfg-ubicacion").value = c.latitud != null ? `${Number(c.latitud)}, ${Number(c.longitud)}` : "";
+  pintarPistaUbicacion();
+  $("cfg-telefono").value = c.telefono || "";
+  $("cfg-app-minutos").value = c.app_minutos || 15;
+  pintarHorario(c.horario);
   actualizarPistaUnidad();
   pintarLogo(c.logo_data_url);
   $("cfg-invoice-status").textContent =
@@ -2301,13 +2306,116 @@ $("btn-remove-logo").addEventListener("click", async () => {
   await loadData();
 });
 
+/* --- Ubicación y horario para la app de clientes ------------------------------
+   La ubicación se pega desde el mapa, nunca se adivina: sin coordenadas la
+   tienda sale en la lista de la app pero no en el mapa. */
+const DIAS_HORARIO = [["lun", "Lunes"], ["mar", "Martes"], ["mie", "Miércoles"], ["jue", "Jueves"],
+                      ["vie", "Viernes"], ["sab", "Sábado"], ["dom", "Domingo"]];
+
+// Saca "lat, lng" de lo que se pegue: coordenadas sueltas o un enlace largo
+// de Google Maps (@lat,lng · !3dlat!4dlng · q=lat,lng) o de Apple Maps
+// (ll= · q= · coordinate=). Devuelve {lat, lng}, null si está vacío, o
+// {error} si no se entiende.
+function leerUbicacion(texto) {
+  const t = (texto || "").trim();
+  if (!t) return null;
+  if (/^https?:\/\/(maps\.app\.goo\.gl|goo\.gl)\//i.test(t)) {
+    return { error: "Ese enlace es corto y no trae la ubicación. Ábrelo, y copia el enlace largo de la barra de direcciones; o en el mapa mantén presionado el punto de la tienda y copia las coordenadas." };
+  }
+  const num = "(-?\\d{1,3}(?:\\.\\d+)?)";
+  const formas = [
+    new RegExp(`!3d${num}!4d${num}`),                       // Google, el punto exacto del lugar
+    new RegExp(`@${num},${num}`),                           // Google, el centro del mapa
+    new RegExp(`[?&](?:q|ll|query|destination|coordinate|daddr)=${num}(?:,|%2C)\\s*${num}`, "i"),
+    new RegExp(`^${num}\\s*[, ]\\s*${num}$`),               // coordenadas sueltas
+  ];
+  for (const re of formas) {
+    const m = t.match(re);
+    if (!m) continue;
+    const lat = Number(m[1]), lng = Number(m[2]);
+    if (!(Math.abs(lat) <= 90 && Math.abs(lng) <= 180) || (lat === 0 && lng === 0)) break;
+    return { lat: Math.round(lat * 1e6) / 1e6, lng: Math.round(lng * 1e6) / 1e6 };
+  }
+  return { error: "No se encontró la ubicación ahí. Pega el enlace largo del mapa o las coordenadas, por ejemplo 14.0723, -87.1921." };
+}
+
+function pintarPistaUbicacion() {
+  const u = leerUbicacion($("cfg-ubicacion").value), hint = $("cfg-ubicacion-hint");
+  if (!u) { hint.textContent = "Sin ubicación: la tienda sale en la lista de la app, pero no en el mapa."; return; }
+  if (u.error) { hint.textContent = u.error; return; }
+  // Centroamérica cae entre 7 y 18.5 de latitud y entre -92.5 y -77 de longitud.
+  // Fuera de ahí casi siempre es latitud y longitud al revés.
+  const lejos = !(u.lat > 7 && u.lat < 18.5 && u.lng > -92.5 && u.lng < -77);
+  hint.innerHTML = `${lejos ? "<strong>Ojo: ese punto no cae en Centroamérica. ¿Están al revés?</strong> " : ""}` +
+    `Se guardará ${esc(u.lat.toFixed(6))}, ${esc(u.lng.toFixed(6))}. ` +
+    `<a href="https://maps.apple.com/?ll=${u.lat},${u.lng}&q=${encodeURIComponent(activeLocation()?.name || "Tienda")}" target="_blank" rel="noopener">Ver en el mapa</a>`;
+}
+$("cfg-ubicacion").addEventListener("input", pintarPistaUbicacion);
+
+function pintarHorario(h) {
+  $("cfg-horario").querySelector("tbody").innerHTML = DIAS_HORARIO.map(([k, nombre]) => {
+    const d = h && h[k];
+    return `<tr data-dia="${k}">
+      <td>${nombre}</td>
+      <td><input type="checkbox" class="hor-abre" ${d || !h ? "checked" : ""} aria-label="Abre el ${nombre.toLowerCase()}"></td>
+      <td><input type="time" class="hor-desde" value="${esc(d ? d.abre : "10:00")}" aria-label="${nombre}: abre a las"></td>
+      <td><input type="time" class="hor-hasta" value="${esc(d ? d.cierra : "21:00")}" aria-label="${nombre}: cierra a las"></td>
+    </tr>`;
+  }).join("");
+  $("cfg-horario").dataset.sinHorario = h ? "" : "1";
+  pintarPistaHorario();
+}
+
+function pintarPistaHorario() {
+  $("cfg-horario-hint").textContent = $("cfg-horario").dataset.sinHorario
+    ? "Esta tienda aún no tiene horario: la app deja pedir a cualquier hora. Cambia la tabla para ponérselo."
+    : "";
+}
+
+// Lee la tabla. Devuelve el objeto que guarda la base, o {error}.
+function leerHorario() {
+  const h = {};
+  for (const tr of $("cfg-horario").querySelectorAll("tbody tr")) {
+    const nombre = tr.cells[0].textContent;
+    if (!tr.querySelector(".hor-abre").checked) { h[tr.dataset.dia] = null; continue; }
+    const abre = tr.querySelector(".hor-desde").value, cierra = tr.querySelector(".hor-hasta").value;
+    if (!/^\d\d:\d\d$/.test(abre) || !/^\d\d:\d\d$/.test(cierra)) return { error: `Falta la hora del ${nombre.toLowerCase()}.` };
+    if (abre >= cierra) return { error: `El ${nombre.toLowerCase()} cierra antes de abrir.` };
+    h[tr.dataset.dia] = { abre, cierra };
+  }
+  return h;
+}
+
+$("cfg-horario").addEventListener("input", () => { $("cfg-horario").dataset.sinHorario = ""; pintarPistaHorario(); });
+$("btn-horario-igual").addEventListener("click", () => {
+  const filas = [...$("cfg-horario").querySelectorAll("tbody tr")];
+  const [lun] = filas;
+  for (const tr of filas.slice(1)) {
+    tr.querySelector(".hor-abre").checked = lun.querySelector(".hor-abre").checked;
+    tr.querySelector(".hor-desde").value = lun.querySelector(".hor-desde").value;
+    tr.querySelector(".hor-hasta").value = lun.querySelector(".hor-hasta").value;
+  }
+  $("cfg-horario").dataset.sinHorario = ""; pintarPistaHorario();
+});
+$("btn-horario-quitar").addEventListener("click", () => pintarHorario(null));
+
 $("cfg-country").addEventListener("change", (e) => {
   $("cfg-taxid-label").textContent = TAX_LABELS[e.target.value] || "NIT";
 });
 
 $("btn-save-config").addEventListener("click", async () => {
   if (!navigator.onLine) { alert("Sin conexión: guardar la configuración necesita internet."); return; }
+  const ubic = leerUbicacion($("cfg-ubicacion").value);
+  if (ubic && ubic.error) { alert(ubic.error); $("cfg-ubicacion").focus(); return; }
+  const horario = $("cfg-horario").dataset.sinHorario ? null : leerHorario();
+  if (horario && horario.error) { alert(horario.error); return; }
+  const minutos = parseInt($("cfg-app-minutos").value, 10);
+  if (!(minutos >= 5 && minutos <= 120)) { alert("Los minutos para preparar un pedido van de 5 a 120."); return; }
+  const telefono = $("cfg-telefono").value.trim();
+  if (telefono && !/^\+?[0-9 -]{7,20}$/.test(telefono)) { alert("El teléfono lleva solo números, espacios o guiones."); return; }
   const { error } = await sb.from("locations").update({
+    latitud: ubic ? ubic.lat : null, longitud: ubic ? ubic.lng : null,
+    horario, telefono: telefono || null, app_minutos: minutos,
     name: $("cfg-name").value, legal_name: $("cfg-legal-name").value,
     country_code: $("cfg-country").value, currency_code: $("cfg-currency").value,
     tax_id_value: $("cfg-taxid").value, address: $("cfg-address").value,
@@ -3358,6 +3466,8 @@ const AUDIT_CAMPOS = {
   include_cup_weight_in_price: "cobra el vaso", legal_name: "razón social",
   tax_id_value: "identificación fiscal", address: "dirección", spent_on: "fecha",
   purchase_series: "serie de compras", supplier_name: "proveedor", supplier_invoice_no: "factura",
+  latitud: "latitud", longitud: "longitud", telefono: "teléfono", app_minutos: "minutos para preparar",
+  horario: "horario",
   exento: "exento", gravado15: "gravado 15%", gravado18: "gravado 18%", isv15: "ISV 15%", isv18: "ISV 18%", received_on: "entrada",
 };
 
@@ -3382,9 +3492,11 @@ function auditResumen(ev) {
   const partes = [];
   Object.keys(AUDIT_CAMPOS).forEach((k) => {
     if (!(k in despues)) return;
+    // El horario es un objeto: se dice que cambió, sin volcarlo entero.
+    const txt = (v) => v === null || v === undefined || v === "" ? "—" : typeof v === "object" ? "(por día)" : v;
     const a = antes[k], b = despues[k];
-    if (String(a) === String(b)) return;
-    partes.push(`${AUDIT_CAMPOS[k]}: ${a === null || a === undefined || a === "" ? "—" : a} → ${b === null || b === undefined || b === "" ? "—" : b}`);
+    if (JSON.stringify(a) === JSON.stringify(b) || String(a) === String(b) && typeof a !== "object") return;
+    partes.push(`${AUDIT_CAMPOS[k]}: ${txt(a)} → ${txt(b)}`);
   });
   return partes.length ? partes.join(" · ") : "cambio menor";
 }

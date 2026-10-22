@@ -27,7 +27,7 @@
       ilike() { return q; }, or() { return q; }, neq() { return q; }, not() { return q; }, is() { return q; },
       eq(col, val) { rows = rows.filter((r) => r[col] === undefined || r[col] === val); return q; },
       single() { single = true; return q; }, maybeSingle() { single = true; return q; },
-      insert(o) { anotar("insert:" + table, o); return q; }, update() { return q; }, delete() { return q; }, upsert() { return q; },
+      insert(o) { anotar("insert:" + table, o); return q; }, update(o) { anotar("update:" + table, o); return q; }, delete() { return q; }, upsert() { return q; },
       then(res, rej) { return Promise.resolve({ data: single ? (rows[0] || null) : rows, error: null }).then(res, rej); },
     };
     return q;

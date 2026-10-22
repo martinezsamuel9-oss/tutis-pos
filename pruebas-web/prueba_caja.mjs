@@ -215,6 +215,29 @@ const texto = (page, sel) => page.locator(sel).innerText();
   await page.waitForFunction(() => document.querySelector("#pin-saved").textContent.includes("guardado"));
   ok((await rpcs(page, "set_manager_pin")).pop().args.p_pin === "4829", "15d PIN guardado");
 
+  // Ubicación y horario para la app de clientes
+  ok((await texto(page, "#cfg-horario-hint")).includes("aún no tiene horario"), "15e una tienda sin horario lo dice (y la app no revisa la hora)");
+  await page.fill("#cfg-ubicacion", "https://maps.app.goo.gl/abc123");
+  ok((await texto(page, "#cfg-ubicacion-hint")).includes("enlace es corto"), "15f un enlace corto de Google se explica, no se adivina");
+  await page.fill("#cfg-ubicacion", "https://www.google.com/maps/place/Mall/@14.0800,-87.2000,17z/data=!3m1!4b1!4m6!3m5!1s0x0:0x0!8m2!3d14.074321!4d-87.192654");
+  ok((await texto(page, "#cfg-ubicacion-hint")).includes("14.074321, -87.192654"), "15g del enlace largo se toma el punto exacto del lugar (!3d!4d), no el centro del mapa");
+  await page.fill("#cfg-ubicacion", "-87.19, 14.07");
+  ok((await texto(page, "#cfg-ubicacion-hint")).includes("¿Están al revés?"), "15h coordenadas al revés: avisa");
+  await page.fill("#cfg-ubicacion", "14.074321, -87.192654");
+  await page.fill("#cfg-telefono", "2200-0000");
+  await page.uncheck('#cfg-horario tr[data-dia="dom"] .hor-abre');
+  await page.fill('#cfg-horario tr[data-dia="vie"] .hor-hasta', "22:00");
+  await page.fill('#cfg-horario tr[data-dia="sab"] .hor-desde', "23:00");
+  page.once("dialog", (d) => d.dismiss());
+  await page.click("#btn-save-config");
+  ok((await rpcs(page, "update:locations")).length === 0, "15i un día que cierra antes de abrir no se guarda");
+  await page.fill('#cfg-horario tr[data-dia="sab"] .hor-desde', "10:00");
+  await page.click("#btn-save-config");
+  const guardado = (await rpcs(page, "update:locations")).pop()?.args || {};
+  ok(guardado.latitud === 14.074321 && guardado.longitud === -87.192654 && guardado.telefono === "2200-0000" && guardado.app_minutos === 15
+     && guardado.horario?.dom === null && guardado.horario?.vie?.cierra === "22:00" && guardado.horario?.lun?.abre === "10:00",
+     "15j se guardan ubicación, teléfono, minutos y horario por día", guardado);
+
   await page.click('.tab-btn[data-tab="reportes"]');
   await page.waitForSelector("#table-wc-incidents tbody tr td");
   const filas = await page.locator("#table-wc-cashiers tbody tr").count();

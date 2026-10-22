@@ -94,7 +94,10 @@ enum Llavero {
 
 // --- Lo que devuelve la base ------------------------------------------------
 struct MenuServidor: Decodable {
-    struct T: Decodable { let id: String; let nombre: String; let lugar: String }
+    struct T: Decodable {
+        let id: String; let nombre: String; let lugar: String
+        let lat: Double?; let lng: Double?; let horario: [String: Franja?]?; let telefono: String?; let minutos: Int?; let zona: String?
+    }
     struct Tam: Decodable { let id: String; let nombre: String; let oz: Int; let precio: Double; let toppings: Int }
     struct P: Decodable { let id: String; let tienda: String; let familia: String; let nombre: String; let precio: Double }
     let tiendas: [T]; let tamanos: [Tam]; let productos: [P]
@@ -107,6 +110,6 @@ struct MovimientoServidor: Decodable, Identifiable {
 }
 struct PedidoServidor: Decodable, Identifiable {
     struct Item: Decodable { let nombre: String; let cantidad: Int; let precio: Double; let sabores: [String]?; let toppings: [String]?; let premium: [String]? }
-    let id: String; let folio: Int; let tienda: String; let lugar: String; let modo: String; let hora: String
+    let id: String; let folio: Int; let tienda: String; let tienda_id: String?; let lugar: String; let modo: String; let hora: String
     let items: [Item]; let total: Double; let estado: String; let creado: String
 }

@@ -768,6 +768,27 @@
         <div class="field"><label for="cfg-purchase-series">Serie de compras de la tienda</label><input id="cfg-purchase-series" maxlength="8" placeholder="Ej. 011C"></div>
         <div class="field stack"><label>Dirección</label><input id="cfg-address"></div>
 
+        <h2 style="margin-top:18px;">En la app de clientes</h2>
+        <div class="sub">
+          Dónde sale la tienda en el mapa, a qué hora se puede pedir para recoger y cuánto tarda un pedido.
+          Fuera de este horario la app no deja pedir.
+        </div>
+        <div class="field stack"><label for="cfg-ubicacion">Ubicación en el mapa</label>
+          <input id="cfg-ubicacion" placeholder="Pega el enlace de Google Maps o Apple Maps, o las coordenadas (14.07, -87.19)">
+        </div>
+        <p class="hint" id="cfg-ubicacion-hint"></p>
+        <div class="field"><label for="cfg-telefono">Teléfono de la tienda</label><input id="cfg-telefono" type="tel" maxlength="20" placeholder="Ej. 2200-0000"></div>
+        <div class="field"><label for="cfg-app-minutos">Minutos para preparar un pedido</label><input id="cfg-app-minutos" type="number" min="5" max="120" step="1"></div>
+        <div class="table-wrap"><table class="data horario" id="cfg-horario">
+          <thead><tr><th>Día</th><th>Abre</th><th>Desde</th><th>Hasta</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <p class="hint">
+          <button class="btn ghost" id="btn-horario-igual" type="button">Mismo horario que el lunes todos los días</button>
+          <button class="btn ghost" id="btn-horario-quitar" type="button">Sin horario (no se revisa la hora)</button>
+        </p>
+        <p class="hint" id="cfg-horario-hint"></p>
+
         <h2 style="margin-top:18px;">Logo</h2>
         <div class="sub">Sale en los comprobantes de venta y en los reportes impresos. Lo ideal es un PNG con fondo transparente.</div>
         <div class="logo-row">

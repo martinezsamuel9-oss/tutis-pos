@@ -5,7 +5,12 @@ struct CarritoView: View {
     @Environment(\.dismiss) private var dismiss
     var alConfirmar: () -> Void
 
-    private let horas = [("ya", "Ya"), ("15:30", "3:30 pm"), ("16:00", "4:00 pm"), ("16:30", "4:30 pm"), ("17:00", "5:00 pm"), ("18:00", "6:00 pm")]
+    // Las horas salen del horario de la tienda (las mismas que acepta la base).
+    private var horas: [(valor: String, texto: String)] { estado.tienda?.horasParaRecoger() ?? [] }
+
+    private func ajustarHora() {
+        if !horas.contains(where: { $0.valor == estado.hora }) { estado.hora = horas.first?.valor ?? "ya" }
+    }
 
     var body: some View {
         @Bindable var estado = estado
@@ -38,11 +43,15 @@ struct CarritoView: View {
                                 ForEach(estado.tiendas) { Text($0.nombre).tag(Optional($0.id)) }
                             }.pickerStyle(.menu).tint(Color.tinta)
                             Etiqueta(texto: "Hora")
+                            if horas.isEmpty, let t = estado.tienda {
+                                Text("\(t.nombreCorto) ya no recibe pedidos hoy. \(t.estado().texto).")
+                                    .font(.system(size: 15)).foregroundStyle(Color.rojo)
+                            }
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 8) {
-                                    ForEach(horas, id: \.0) { v, t in
+                                    ForEach(horas, id: \.valor) { v, t in
                                         Button { estado.hora = v } label: {
-                                            Text(v == "ya" ? "Lo antes posible" : t).font(.system(size: 15, weight: .semibold))
+                                            Text(t).font(.system(size: 15, weight: .semibold))
                                                 .padding(.horizontal, 14).frame(minHeight: 44)
                                                 .foregroundStyle(estado.hora == v ? Color.papel : Color.tinta)
                                                 .background(estado.hora == v ? Color.tinta : Color.superficie, in: RoundedRectangle(cornerRadius: 14))
@@ -56,7 +65,7 @@ struct CarritoView: View {
                             fila("Total", estado.subtotal, grande: true)
                             Text("Ganas unos \(Int((estado.subtotal / estado.montoPorPunto).rounded(.down))) puntos al pagar con tu carnet").font(.system(size: 14)).foregroundStyle(Color.tinta2)
                             NavigationLink { PagarView(alConfirmar: alConfirmar) } label: { Text("Continuar").frame(maxWidth: .infinity) }
-                                .buttonStyle(BotonPildora())
+                                .buttonStyle(BotonPildora()).disabled(horas.isEmpty).opacity(horas.isEmpty ? 0.5 : 1)
                         }
                     }
                 }.padding(20)
@@ -64,6 +73,8 @@ struct CarritoView: View {
             .background(Color.papel)
             .navigationTitle("Tu pedido").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Cerrar") { dismiss() } } }
+            .onAppear(perform: ajustarHora)
+            .onChange(of: estado.tiendaId) { ajustarHora() }
         }
     }
 }
@@ -88,7 +99,7 @@ struct PagarView: View {
                     Tarjeta {
                         Etiqueta(texto: "Recoges en")
                         Text(t.nombre).font(.display(19))
-                        Text((t.lugar.isEmpty ? "" : "\(t.lugar) · ") + (estado.hora == "ya" ? "lo antes posible" : "a las \(estado.hora)")).foregroundStyle(Color.tinta2)
+                        Text((t.lugar.isEmpty ? "" : "\(t.lugar) · ") + (estado.hora == "ya" ? "lo antes posible" : "a las \(horaBonita(estado.hora))")).foregroundStyle(Color.tinta2)
                     }
                 }
                 Text("Forma de pago").font(.display(18))
@@ -172,7 +183,10 @@ struct SeguimientoView: View {
                         Tarjeta {
                             Etiqueta(texto: "Recoges en")
                             Text(p.tienda).font(.display(18)); if !p.lugar.isEmpty { Text(p.lugar).foregroundStyle(Color.tinta2) }
-                            Text(p.hora == "ya" ? "Lo antes posible" : "A las \(p.hora)").foregroundStyle(Color.tinta2)
+                            Text(p.hora == "ya" ? "Lo antes posible" : "A las \(horaBonita(p.hora))").foregroundStyle(Color.tinta2)
+                            if p.estado != "entregado" && p.estado != "cancelado", let t = estado.tiendas.first(where: { $0.id == p.tienda_id }), t.coordenada != nil {
+                                BotonComoLlegar(tienda: t).padding(.top, 4)
+                            }
                         }
                         VStack(alignment: .leading, spacing: 10) {
                             Text("Tu pedido").font(.display(18))

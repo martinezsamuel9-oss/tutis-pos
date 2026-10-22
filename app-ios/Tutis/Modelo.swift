@@ -10,7 +10,6 @@ struct Sabor: Identifiable, Hashable { let id: String; let nombre: String }
 struct Familia: Identifiable { let id: String; let nombre: String; let opciones: [String] }
 struct Tamano: Identifiable, Hashable { let id: String; let nombre: String; let oz: Int; let precio: Double; let toppings: Int }
 struct Producto: Identifiable, Hashable { let id: String; let tienda: String; let familia: String; let nombre: String; let precio: Double }
-struct Tienda: Identifiable, Hashable { let id: String; let nombre: String; let lugar: String; var minutos: Int = 15 }
 struct DisenoRegalo: Identifiable, Hashable { let id: String; let seccion: String; let mensaje: String; let foto: String; let fondo: UInt32; let tinta: UInt32 }
 
 enum Catalogo {
@@ -144,7 +143,10 @@ final class Estado {
     func cargar() async {
         do {
             let m: MenuServidor = try await API.shared.rpc("app_menu")
-            tiendas = m.tiendas.map { Tienda(id: $0.id, nombre: $0.nombre, lugar: $0.lugar) }
+            tiendas = m.tiendas.map {
+                Tienda(id: $0.id, nombre: $0.nombre, lugar: $0.lugar, lat: $0.lat, lng: $0.lng, horario: $0.horario, telefono: $0.telefono,
+                       minutos: $0.minutos ?? 15, zona: $0.zona.flatMap(TimeZone.init(identifier:)) ?? TimeZone(identifier: "America/Tegucigalpa")!)
+            }
             tamanos = m.tamanos.map { Tamano(id: $0.id, nombre: $0.nombre, oz: $0.oz, precio: $0.precio, toppings: $0.toppings) }
             productos = m.productos.map { Producto(id: $0.id, tienda: $0.tienda, familia: $0.familia, nombre: $0.nombre, precio: $0.precio) }
             precioPremium = m.premium; aceptaDomicilio = m.domicilio; costoEnvio = m.envio

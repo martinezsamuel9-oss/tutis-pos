@@ -62,7 +62,10 @@ struct Raiz: View {
             Tab(value: Pestana.regalar) { NavigationStack { RegalarView() } } label: { Label("Regalar", systemImage: "gift.fill") }
             Tab(value: Pestana.puntos) { NavigationStack { PuntosView() } } label: { Label("Puntos", systemImage: "star.fill") }
         }
-        if #available(iOS 26.0, *) {
+        // Sin pedido no hay barra: la de iOS 26 se pintaba vacía.
+        if #available(iOS 26.1, *) {
+            tabs.tabViewBottomAccessory(isEnabled: estado.piezas > 0 || estado.pedidoActivo != nil) { barraPedido }
+        } else if #available(iOS 26.0, *) {
             tabs.tabViewBottomAccessory { barraPedido }
         } else {
             tabs.safeAreaInset(edge: .bottom) { barraPedido.padding(.horizontal, 16).padding(.bottom, 4) }

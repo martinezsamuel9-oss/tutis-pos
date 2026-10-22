@@ -367,6 +367,8 @@ table.data input {
   width: 100%; min-width: 80px; padding: 6px 8px; border-radius: var(--radius-s);
   border: 1px solid var(--border); background: var(--bg); color: var(--ink); font-size: 0.85rem;
 }
+table.horario input[type="checkbox"] { width: 24px; min-width: 0; height: 24px; }
+table.horario input[type="time"] { min-width: 110px; }
 table.data tr.low-stock td { background: var(--danger-bg); }
 
 .kpi-grid .alert { grid-column: 1 / -1; }

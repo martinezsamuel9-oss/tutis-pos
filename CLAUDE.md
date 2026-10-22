@@ -71,6 +71,8 @@ sql/15_productos_icg.sql    los productos legibles del video de la caja ICG, con
 sql/16_tarjeta.sql          voucher de cada venta con tarjeta (autorización + últimos 4) y lista en el cierre
 sql/17_app_clientes.sql     app de clientes: carnet ligado al usuario, menú público, pedidos para recoger;
                             y cierra el hueco del registro suelto (app_role exige sucursal)
+sql/18_tiendas_mapa.sql     ubicación, horario por día, teléfono y minutos de cada tienda para la app;
+                            el pedido de la app se rechaza fuera del horario
 app-ios/           app nativa de iPhone (SwiftUI) para clientes: pedir, puntos, regalos (ver 3.9)
 sql/13_privilegios.sql      quita TRUNCATE, TRIGGER, REFERENCES y MAINTAIN (PG17) a anon y authenticated,
                             también para las tablas futuras (TRUNCATE se salta RLS)
@@ -80,7 +82,7 @@ wallet/secretos/    llave y certificado de Apple — GITIGNORADO, nunca al repo
 sql/pruebas/        prueba_aislamiento.sql (13) + prueba_seguridad.sql (48 ataques)
                     + prueba_fidelizacion.sql (19) + prueba_pesos.sql (48)
                     + prueba_huella.sql (12) + prueba_compras.sql (28)
-                    + prueba_productos.sql (14) + prueba_tarjeta.sql (7) + prueba_app.sql (32)
+                    + prueba_productos.sql (14) + prueba_tarjeta.sql (7) + prueba_app.sql (32) + prueba_mapa.sql (32)
                     + borrar_datos_de_prueba.sql (quita las demostraciones)
                     + datos_de_demostracion.sql (14 días de ventas, borrables)
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
@@ -510,6 +512,19 @@ de Supabase con Client ID = bundle). Lo que no hay que deshacer:
    carnet, como siempre. El cliente ve el estado (consulta cada 10 s).
 6. Sabores y toppings de la app vienen de la web de la marca (fotos); las
    tarjetas de regalo aún no existen en la base y la app lo dice.
+7. **El mapa sale de la base, no de Apple Maps** (sql/18, 2026-10-22). La
+   tienda pone su ubicación en *Configuración → En la app de clientes*
+   pegando el enlace LARGO del mapa (se toma `!3d!4d`, el punto del lugar,
+   antes que `@`, que es el centro de la pantalla) o las coordenadas. Nunca
+   se adivinan: sin coordenadas la tienda sale en la lista y no en el mapa.
+8. **El horario es por día y en hora LOCAL** (zona por país, `zona_tienda`).
+   Con horario, `app_crear_pedido` rechaza la tienda cerrada o una hora fuera
+   de rango (`motivo_hora_no_valida`); sin horario, no valida. La app repite
+   la cuenta (`Tienda.motivo` en Tiendas.swift) solo para no ofrecer horas
+   que la base va a rechazar. Si se cambia una, se cambia la otra.
+9. **La ubicación del cliente** se pide "mientras se usa" y solo ordena las
+   tiendas por cercanía; no se guarda ni se manda. Cómo llegar abre Apple
+   Maps, Google Maps o Waze (enlaces universales, sin llaves).
 
 ## 4. Restricciones permanentes (pedidas explícitamente)
 
@@ -673,6 +688,7 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/14_productos.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/15_productos_icg.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/16_tarjeta.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/17_app_clientes.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/18_tiendas_mapa.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_aislamiento.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_seguridad.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_fidelizacion.sql
@@ -682,6 +698,7 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_compras.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_productos.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_tarjeta.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_app.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_mapa.sql
 ```
 
 `00_simulacion_supabase.sql` recrea lo que Supabase ya trae (schema `auth`,
