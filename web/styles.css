@@ -319,6 +319,21 @@ main { padding: 20px 16px 60px; }
    distinto de lo que todavía se puede cambiar. */
 .scale-card { padding-top: 14px; padding-bottom: 14px; }
 .scale-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; }
+/* --- La caja (turno y arqueo) --- */
+.caja-estado { font-size: 1.15rem; font-weight: 700; }
+.caja-estado.abierta { color: var(--success); }
+.caja-estado.cerrada { color: var(--danger); }
+.conteo-grid { display: grid; grid-template-columns: auto 1fr auto; gap: 6px 10px; align-items: center; margin: 8px 0; }
+.conteo-grid .conteo-sep { grid-column: 1 / -1; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); margin-top: 6px; }
+.conteo-grid label { font-weight: 700; min-width: 64px; }
+.conteo-grid input { font-size: 1.1rem; padding: 10px 12px; min-height: 48px; border-radius: var(--radius-s);
+  border: 1px solid var(--border); background: var(--bg); color: var(--ink); width: 100%; }
+.conteo-grid .conteo-sub { min-width: 96px; text-align: right; color: var(--ink-soft); }
+.conteo-total { font-size: 1.1rem; text-align: right; padding: 8px 0; border-top: 1px solid var(--border); }
+.caja-cuenta { width: 100%; border-collapse: collapse; margin: 8px 0; }
+.caja-cuenta td { padding: 5px 4px; border-bottom: 1px solid var(--border); }
+.caja-cuenta td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.caja-cuenta tr.total td { font-weight: 700; border-bottom: none; }
 .scale-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); }
 .scale-reading { font-size: 1.9rem; font-weight: 700; line-height: 1.15; }
 .scale-reading.moving { color: var(--ink-soft); }
@@ -572,3 +587,4 @@ table.data tr.low-stock td { background: var(--danger-bg); }
 .pedido-total { display: flex; justify-content: space-between; font-size: 1.1rem; border-top: 1px dashed var(--border); padding-top: 8px; }
 .pedido-acciones { display: flex; gap: 8px; flex-wrap: wrap; }
 .pedido-acciones .btn { flex: 1; min-width: 120px; }
+#table-turnos td.num { white-space: nowrap; }

@@ -73,6 +73,7 @@ sql/17_app_clientes.sql     app de clientes: carnet ligado al usuario, menú pú
                             y cierra el hueco del registro suelto (app_role exige sucursal)
 sql/18_tiendas_mapa.sql     ubicación, horario por día, teléfono y minutos de cada tienda para la app;
                             el pedido de la app se rechaza fuera del horario
+sql/19_caja.sql             turnos de caja (una caja por tienda, varias cajeras), retiros/entradas y arqueo ciego
 app-ios/           app nativa de iPhone (SwiftUI) para clientes: pedir, puntos, regalos (ver 3.9)
 sql/13_privilegios.sql      quita TRUNCATE, TRIGGER, REFERENCES y MAINTAIN (PG17) a anon y authenticated,
                             también para las tablas futuras (TRUNCATE se salta RLS)
@@ -82,7 +83,7 @@ wallet/secretos/    llave y certificado de Apple — GITIGNORADO, nunca al repo
 sql/pruebas/        prueba_aislamiento.sql (13) + prueba_seguridad.sql (48 ataques)
                     + prueba_fidelizacion.sql (19) + prueba_pesos.sql (48)
                     + prueba_huella.sql (12) + prueba_compras.sql (28)
-                    + prueba_productos.sql (14) + prueba_tarjeta.sql (7) + prueba_app.sql (32) + prueba_mapa.sql (32)
+                    + prueba_productos.sql (14) + prueba_tarjeta.sql (7) + prueba_app.sql (32) + prueba_mapa.sql (32) + prueba_caja.sql (38)
                     + borrar_datos_de_prueba.sql (quita las demostraciones)
                     + datos_de_demostracion.sql (14 días de ventas, borrables)
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
@@ -526,6 +527,36 @@ de Supabase con Client ID = bundle). Lo que no hay que deshacer:
    tiendas por cercanía; no se guarda ni se manda. Cómo llegar abre Apple
    Maps, Google Maps o Waze (enlaces universales, sin llaves).
 
+## 3.10 La caja: turnos y arqueo ciego
+
+Pedido del dueño (2026-10-27): cuadrar la caja. Una sola caja (gaveta) por
+tienda, 2 cajeras o más. Tarjeta *Caja* arriba de la báscula en Venta, y
+*Reportes → Turnos de caja* para la gerente. Lo que no hay que deshacer:
+
+1. **El turno es de la CAJA, no de la cajera**: una sola abierta por tienda
+   (índice único parcial). Cualquier cajera vende dentro del turno abierto;
+   responde por la gaveta quien la abrió. Cambio de cajera = la que sale
+   cierra contando y la que entra abre contando; si no coincide con lo que
+   dejó el cierre anterior, queda la **diferencia de entrega**.
+2. **Arqueo ciego**: la cajera cuenta por denominación SIN ver el esperado.
+   Las tablas no se leen directo (ni la gerente): todo va por funciones
+   `caja_*`, y `caja_estado` no devuelve esperado ni fondo. El esperado se
+   muestra solo después de guardar el conteo, que ya no se corrige; ella
+   puede explicar la diferencia (una vez, en la hora siguiente) y la gerente
+   la revisa con nota.
+3. **El esperado se calcula por la hora de la venta** (`sales.created_at`, la
+   hora en que se cobró): fondo + ventas en efectivo + entradas − retiros. No
+   se tocó `process_sale`. Una venta sin conexión que sube después cae en su
+   turno; el reporte recalcula y muestra el esperado "al cerrar" contra el de
+   ahora.
+4. **La caja nunca tumba una venta.** Con internet y la caja cerrada, la
+   pantalla pide abrirla antes de cobrar; sin internet se cobra igual y la
+   venta sale en el reporte como **fuera de turno**.
+5. **No se cierra con ventas sin subir** en esa computadora: el esperado
+   saldría corto y parecería faltante.
+6. Denominaciones por moneda en `DENOMINACIONES` (app.js). El servidor suma
+   el conteo (`caja_suma_conteo`) y rechaza denominaciones o cantidades raras.
+
 ## 4. Restricciones permanentes (pedidas explícitamente)
 
 - **NUNCA incluir el sitio web `https://tutis.innova504.com/` en la factura o
@@ -689,6 +720,7 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/15_productos_icg.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/16_tarjeta.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/17_app_clientes.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/18_tiendas_mapa.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/19_caja.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_aislamiento.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_seguridad.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_fidelizacion.sql
@@ -699,6 +731,7 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_productos.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_tarjeta.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_app.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_mapa.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_caja.sql
 ```
 
 `00_simulacion_supabase.sql` recrea lo que Supabase ya trae (schema `auth`,

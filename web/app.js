@@ -235,7 +235,7 @@ function updateConnBadge() {
   }
 }
 
-window.addEventListener("online", () => { updateConnBadge(); syncPending(); if (typeof pintarClienteSeleccionado === "function") pintarClienteSeleccionado(); });
+window.addEventListener("online", () => { updateConnBadge(); syncPending(); if (typeof cargarCaja === "function") cargarCaja(); if (typeof pintarClienteSeleccionado === "function") pintarClienteSeleccionado(); });
 window.addEventListener("offline", () => { updateConnBadge(); if (typeof pintarClienteSeleccionado === "function") pintarClienteSeleccionado(); });
 setInterval(() => { if (navigator.onLine) syncPending(); }, 60000);
 
@@ -571,6 +571,7 @@ function renderAll() {
   renderProductos();
   renderQuote();
   iniciarPedidosApp();
+  cargarCaja();
   if (canManage()) {
     renderInventory();
     renderProductsTable();
@@ -600,7 +601,8 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     if (btn.dataset.tab === "gastos" && !GAS.loaded) cargarGastos();
     if (btn.dataset.tab === "compras") { prepararCompras(); if (!CMP.loaded) cargarCompras(); }
     if (btn.dataset.tab === "clientes") { llenarReglas(); if (!CLI.loaded) cargarClientes(""); }
-    if (btn.dataset.tab === "reportes") { cargarControlPesos(); prepararLibroVentas(); }
+    if (btn.dataset.tab === "reportes") { cargarControlPesos(); prepararLibroVentas(); cargarTurnos(); }
+    if (btn.dataset.tab === "venta") cargarCaja();
     if (btn.dataset.tab === "config") pintarEstadoPin();
   });
 });
@@ -1494,6 +1496,7 @@ $("btn-charge").addEventListener("click", () => chargeSale(false));
 async function chargeSale(force) {
   const plan = buildPlan();
   if (!plan) { alert("El pedido está vacío: pesa la taza o toca un producto."); return; }
+  if (cajaCerradaBloquea()) return;
   const manual = PESO.modo === "manual";
   if (!manual) {
     const sinPesar = orderRows.filter((r) => r.pesadoG == null)
@@ -1694,6 +1697,359 @@ function bloquePuntosRecibo(payload, result, servidor, offline) {
 
 $("btn-close-receipt").addEventListener("click", () => { $("receipt-modal").hidden = true; });
 $("btn-print-receipt").addEventListener("click", () => window.print());
+
+/* ===========================================================================
+   8b. LA CAJA: turno, retiros y arqueo ciego (sql/19)
+   ---------------------------------------------------------------------------
+   Una sola caja por tienda, varias cajeras. El turno es de la caja: lo abre
+   quien cuenta el fondo y lo cierra quien la entrega (o la que la recibe, o la
+   gerente). La pantalla NUNCA muestra cuánto debería haber antes de que el
+   conteo quede guardado: si la cajera lo viera, contaría eso.
+   =========================================================================== */
+const DENOMINACIONES = {
+  HNL: { billetes: [500, 200, 100, 50, 20, 10, 5, 2, 1], monedas: [0.5, 0.2, 0.1, 0.05] },
+  GTQ: { billetes: [200, 100, 50, 20, 10, 5, 1], monedas: [0.5, 0.25, 0.1, 0.05] },
+  USD: { billetes: [100, 50, 20, 10, 5, 1], monedas: [0.25, 0.1, 0.05, 0.01] },
+};
+const CAJA = { estado: null, modo: null, cierre: null, timer: null };
+const CAJA_KEY = "tutis_caja_estado";
+
+function denominaciones() {
+  const loc = activeLocation();
+  return DENOMINACIONES[(loc && loc.currency_code) || "HNL"] || DENOMINACIONES.HNL;
+}
+
+// Lo último que se supo de la caja, por tienda: sin internet se sigue
+// mostrando (y se puede seguir vendiendo).
+async function cargarCaja() {
+  const loc = STATE.activeLocationId;
+  if (!sb || !loc) { $("caja-card").hidden = true; return; }
+  if (navigator.onLine) {
+    const { data, error } = await sb.rpc("caja_estado", { p_location: loc });
+    if (!error && data) { CAJA.estado = data; lsSet(CAJA_KEY, { loc, estado: data }); }
+    else if (error) console.error("caja_estado:", error.message);
+  } else {
+    const c = lsGet(CAJA_KEY, null);
+    CAJA.estado = c && c.loc === loc ? c.estado : null;
+  }
+  pintarCaja();
+  if (!CAJA.timer) CAJA.timer = setInterval(() => { if (!document.hidden && navigator.onLine) cargarCaja(); }, 120000);
+}
+
+function pintarCaja() {
+  const e = CAJA.estado;
+  $("caja-card").hidden = false;
+  const est = $("caja-estado");
+  const enLinea = navigator.onLine;
+  est.classList.toggle("abierta", !!(e && e.abierta));
+  est.classList.toggle("cerrada", !!(e && !e.abierta));
+  if (!e) {
+    est.textContent = "—";
+    $("caja-detalle").textContent = enLinea ? "No se pudo consultar la caja." : "Sin conexión: la caja se abre y se cierra con internet. Se puede seguir vendiendo.";
+  } else if (e.abierta) {
+    const t = e.turno;
+    est.textContent = "Caja abierta";
+    const movs = (t.movimientos || []).length;
+    $("caja-detalle").textContent = `${t.es_mio ? "La abriste" : `La abrió ${t.abierto_por}`} a las ${new Date(t.abierto_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` +
+      (movs ? ` · ${movs} retiro(s) o entrada(s)` : "") + (enLinea ? "" : " · sin conexión");
+  } else {
+    est.textContent = "Caja cerrada";
+    $("caja-detalle").textContent = "Cuenta el fondo para abrirla antes de cobrar.";
+  }
+  $("btn-caja-abrir").hidden = !(e && !e.abierta);
+  $("btn-caja-mov").hidden = !(e && e.abierta);
+  $("btn-caja-cerrar").hidden = !(e && e.abierta);
+  $("btn-caja-cerrar").textContent = e && e.abierta && !e.turno.es_mio ? "Recibir o cerrar caja" : "Cerrar o entregar caja";
+}
+
+// Antes de cobrar: con internet y la caja cerrada, primero se abre. Sin
+// internet (o si no se sabe) se cobra igual: la venta queda "fuera de turno"
+// en el reporte, pero nunca se pierde una venta por la caja.
+function cajaCerradaBloquea() {
+  if (!navigator.onLine || !CAJA.estado || CAJA.estado.abierta) return false;
+  alert("La caja está cerrada. Cuenta el fondo para abrirla y después cobra.");
+  abrirModalCaja("abrir");
+  return true;
+}
+
+function pintarConteo() {
+  const d = denominaciones();
+  const fila = (v, tipo) => `<label for="den-${tipo}-${v}">${esc(money(v).replace(/\.00$/, ""))}</label>
+    <input id="den-${tipo}-${v}" type="number" min="0" step="1" inputmode="numeric" data-den="${v}" placeholder="0" aria-label="Cantidad de ${tipo} de ${v}">
+    <span class="conteo-sub num" data-sub="${v}"></span>`;
+  $("caja-conteo").innerHTML = `<div class="conteo-sep">Billetes</div>${d.billetes.map((v) => fila(v, "billetes")).join("")}` +
+    `<div class="conteo-sep">Monedas</div>${d.monedas.map((v) => fila(v, "monedas")).join("")}`;
+  $("caja-contado").textContent = money(0);
+}
+
+// {detalle, total, error}. El total que ve la cajera es SU conteo, no el esperado.
+function leerConteo() {
+  const detalle = {};
+  let total = 0;
+  for (const inp of $("caja-conteo").querySelectorAll("input[data-den]")) {
+    const raw = inp.value.trim();
+    const sub = inp.parentElement.querySelector(`[data-sub="${inp.dataset.den}"]`);
+    if (raw === "") { if (sub) sub.textContent = ""; continue; }
+    if (!/^\d{1,5}$/.test(raw)) return { error: `Revisa la cantidad de ${money(Number(inp.dataset.den))}: solo números enteros.` };
+    const n = parseInt(raw, 10), v = Number(inp.dataset.den);
+    if (sub) sub.textContent = n ? money(v * n) : "";
+    if (n) { detalle[String(v)] = n; total += v * n; }
+  }
+  return { detalle, total: r2(total) };
+}
+$("caja-conteo").addEventListener("input", () => {
+  const c = leerConteo();
+  $("caja-contado").textContent = c.error ? "—" : money(c.total);
+});
+
+function abrirModalCaja(modo) {
+  if (!navigator.onLine) { alert("Sin conexión: la caja se abre, se cierra y registra retiros con internet. Se puede seguir vendiendo."); return; }
+  CAJA.modo = modo; CAJA.cierre = null;
+  const t = CAJA.estado && CAJA.estado.turno;
+  const titulos = {
+    abrir: ["Abrir la caja", "Cuenta el dinero que hay en la gaveta, billete por billete. Ese es el fondo del turno."],
+    cerrar: [t && !t.es_mio ? "Recibir o cerrar la caja" : "Cerrar o entregar la caja",
+             "Cuenta todo el dinero de la gaveta, billete por billete. El sistema no te dice cuánto debería haber: lo calcula al guardar."],
+    mov: ["Retiro o entrada de efectivo", "Cada vez que se saca o se mete dinero en la gaveta, se anota con el motivo."],
+  };
+  $("caja-titulo").textContent = titulos[modo][0];
+  $("caja-sub").textContent = titulos[modo][1];
+  $("caja-conteo-area").hidden = modo === "mov";
+  $("caja-fondo-area").hidden = modo !== "cerrar";
+  $("caja-mov-area").hidden = modo !== "mov";
+  $("caja-resultado").hidden = true; $("caja-resultado").innerHTML = "";
+  $("caja-explicar-area").hidden = true;
+  $("btn-caja-imprimir").hidden = true;
+  $("btn-caja-ok").hidden = false; $("btn-caja-ok").disabled = false;
+  $("btn-caja-ok").textContent = modo === "abrir" ? "Abrir caja" : modo === "cerrar" ? "Guardar conteo y cerrar" : "Guardar";
+  $("btn-caja-cancelar").textContent = "Cancelar";
+  $("caja-msg").textContent = "";
+  $("caja-deja").value = "";
+  $("caja-mov-monto").value = ""; $("caja-mov-otro").value = ""; $("caja-mov-otro").hidden = true;
+  $("caja-mov-motivo").selectedIndex = 0;
+  if (modo !== "mov") pintarConteo();
+  $("caja-modal").hidden = false;
+}
+
+$("btn-caja-abrir").addEventListener("click", () => abrirModalCaja("abrir"));
+$("btn-caja-mov").addEventListener("click", () => abrirModalCaja("mov"));
+$("btn-caja-cerrar").addEventListener("click", () => abrirModalCaja("cerrar"));
+$("btn-caja-cancelar").addEventListener("click", () => { $("caja-modal").hidden = true; });
+$("btn-caja-queda-todo").addEventListener("click", () => {
+  const c = leerConteo();
+  if (!c.error) $("caja-deja").value = c.total.toFixed(2);
+});
+$("caja-mov-motivo").addEventListener("change", () => {
+  $("caja-mov-otro").hidden = $("caja-mov-motivo").value !== "otro";
+  if (!$("caja-mov-otro").hidden) $("caja-mov-otro").focus();
+});
+
+// Un mensaje del servidor que la cajera entiende, o el genérico.
+function errorCaja(error) {
+  const m = (error && error.message) || "";
+  return /caja|conteo|fondo|motivo|monto|denominaci|cantidad|tienda|explica|turno|perfil/i.test(m) ? m
+    : "No se pudo guardar. Si sigue pasando, avísale a soporte técnico.";
+}
+
+$("btn-caja-ok").addEventListener("click", async () => {
+  const msg = $("caja-msg"), ok = $("btn-caja-ok");
+  if (!navigator.onLine) { msg.textContent = "Sin conexión: inténtalo cuando vuelva el internet."; return; }
+  const loc = STATE.activeLocationId;
+
+  if (CAJA.modo === "mov") {
+    const tipo = $("caja-mov-tipo").value, monto = parseFloat($("caja-mov-monto").value);
+    const motivo = $("caja-mov-motivo").value === "otro" ? $("caja-mov-otro").value.trim() : $("caja-mov-motivo").value;
+    if (!(monto > 0)) { msg.textContent = "Escribe el monto."; return; }
+    if (motivo.length < 3) { msg.textContent = "Escribe el motivo."; return; }
+    ok.disabled = true;
+    const { data, error } = await sb.rpc("caja_movimiento", { p_location: loc, p_tipo: tipo, p_monto: monto, p_motivo: motivo });
+    ok.disabled = false;
+    if (error) { msg.textContent = errorCaja(error); return; }
+    CAJA.estado = data; lsSet(CAJA_KEY, { loc, estado: data }); pintarCaja();
+    $("caja-modal").hidden = true;
+    return;
+  }
+
+  const c = leerConteo();
+  if (c.error) { msg.textContent = c.error; return; }
+
+  if (CAJA.modo === "abrir") {
+    if (c.total === 0 && !confirm("¿Abrir la caja sin fondo (L 0)?")) return;
+    ok.disabled = true;
+    const { data, error } = await sb.rpc("caja_abrir", { p_location: loc, p_conteo: c.detalle });
+    ok.disabled = false;
+    if (error) { msg.textContent = errorCaja(error); return; }
+    await cargarCaja();
+    const dif = data.diferencia_entrega == null ? null : Number(data.diferencia_entrega);
+    if (dif) {
+      mostrarResultadoCaja(`<div class="alert bad">El turno anterior dejó ${esc(money(data.fondo_anterior))} en la gaveta y contaste ${esc(money(data.fondo))}:
+        ${dif < 0 ? "faltan" : "sobran"} <strong>${esc(money(Math.abs(dif)))}</strong>. Queda anotado para la gerente.</div>`);
+    } else {
+      $("caja-modal").hidden = true;
+    }
+    return;
+  }
+
+  // Cerrar: primero que suban las ventas sin conexión; si no, lo esperado
+  // saldría corto y parecería un faltante que no es.
+  if (STATE.pending.length) await syncPending();
+  if (STATE.pending.length) {
+    msg.textContent = `Hay ${STATE.pending.length} venta(s) sin subir. Espera a que suban (revisa la conexión) y vuelve a intentarlo.`;
+    return;
+  }
+  const deja = $("caja-deja").value.trim();
+  if (deja === "" || !(parseFloat(deja) >= 0)) { msg.textContent = "Escribe cuánto dinero queda en la gaveta (puede ser 0)."; $("caja-deja").focus(); return; }
+  if (parseFloat(deja) > c.total) { msg.textContent = "No puede quedar en la gaveta más de lo que contaste."; return; }
+  if (!confirm(`Contaste ${money(c.total)} y quedan ${money(parseFloat(deja))} en la gaveta.\n\nUna vez guardado, el conteo no se puede cambiar. ¿Guardar?`)) return;
+  ok.disabled = true;
+  const { data, error } = await sb.rpc("caja_cerrar", { p_location: loc, p_conteo: c.detalle, p_deja_fondo: parseFloat(deja) });
+  ok.disabled = false;
+  if (error) { msg.textContent = errorCaja(error); return; }
+  CAJA.cierre = { ...data, conteo: c.detalle };
+  await cargarCaja();
+  mostrarResultadoCaja(resumenCierreHtml(data), Number(data.diferencia) !== 0);
+});
+
+function resumenCierreHtml(d) {
+  const dif = Number(d.diferencia);
+  const veredicto = dif === 0 ? `<div class="alert ok">La caja cuadra.</div>`
+    : `<div class="alert bad">${dif < 0 ? "Faltan" : "Sobran"} <strong>${esc(money(Math.abs(dif)))}</strong>.</div>`;
+  return veredicto + `<table class="caja-cuenta">
+    <tr><td>Fondo al abrir</td><td>${esc(money(d.fondo))}</td></tr>
+    <tr><td>Ventas en efectivo (${Number(d.n_efectivo)})</td><td>+ ${esc(money(d.ventas_efectivo))}</td></tr>
+    <tr><td>Entradas</td><td>+ ${esc(money(d.entradas))}</td></tr>
+    <tr><td>Retiros</td><td>− ${esc(money(d.retiros))}</td></tr>
+    <tr class="total"><td>Debería haber</td><td>${esc(money(d.esperado))}</td></tr>
+    <tr class="total"><td>Contado</td><td>${esc(money(d.contado))}</td></tr>
+    <tr><td>Queda en la gaveta</td><td>${esc(money(d.deja_fondo))}</td></tr>
+  </table>
+  <p class="hint">Aparte, para cuadrar con el datáfono y el banco: tarjeta ${Number(d.n_tarjeta)} venta(s) por ${esc(money(d.tarjeta))};
+    transferencia ${Number(d.n_transferencia)} por ${esc(money(d.transferencia))}.</p>`;
+}
+
+function mostrarResultadoCaja(html, pedirExplicacion) {
+  $("caja-conteo-area").hidden = true; $("caja-fondo-area").hidden = true; $("caja-mov-area").hidden = true;
+  $("caja-sub").textContent = "";
+  $("caja-resultado").innerHTML = html; $("caja-resultado").hidden = false;
+  $("caja-explicar-area").hidden = !pedirExplicacion; $("caja-explicacion").value = "";
+  $("btn-caja-imprimir").hidden = !CAJA.cierre;
+  $("btn-caja-ok").hidden = true;
+  $("btn-caja-cancelar").textContent = "Listo";
+  $("caja-msg").textContent = "";
+}
+
+$("btn-caja-explicar").addEventListener("click", async () => {
+  const texto = $("caja-explicacion").value.trim();
+  if (texto.length < 3) { $("caja-msg").textContent = "Escribe la explicación."; return; }
+  const { error } = await sb.rpc("caja_explicar", { p_session: CAJA.cierre.id, p_texto: texto });
+  if (error) { $("caja-msg").textContent = errorCaja(error); return; }
+  CAJA.cierre.explicacion = texto;
+  $("caja-explicar-area").hidden = true;
+  $("caja-msg").textContent = "Explicación guardada.";
+});
+
+// El comprobante del arqueo, para firmarlo en papel.
+$("btn-caja-imprimir").addEventListener("click", () => {
+  const d = CAJA.cierre, loc = activeLocation();
+  if (!d) return;
+  const conteo = Object.entries(d.conteo || {}).sort((a, b) => Number(b[0]) - Number(a[0])).map(([v, n]) => `${money(Number(v))} × ${n} = ${money(Number(v) * n)}`).join("\n");
+  const hora = (x) => new Date(x).toLocaleString();
+  $("receipt-body").innerHTML = logoHtml() + `<div class="ticket" style="white-space:pre-wrap;">
+${esc(loc.name)}
+ARQUEO DE CAJA
+------------------------------
+Abrió: ${esc(d.abierto_por)}  ${esc(hora(d.abierto_at))}
+Cerró: ${esc(d.cerrado_por)}  ${esc(hora(d.cerrado_at))}
+------------------------------
+${esc(conteo)}
+------------------------------
+Fondo al abrir:       ${esc(money(d.fondo))}
+Ventas en efectivo:   ${esc(money(d.ventas_efectivo))}
+Entradas:             ${esc(money(d.entradas))}
+Retiros:              ${esc(money(d.retiros))}
+Debería haber:        ${esc(money(d.esperado))}
+Contado:              ${esc(money(d.contado))}
+DIFERENCIA:           ${esc(money(d.diferencia))}
+Queda en la gaveta:   ${esc(money(d.deja_fondo))}
+${d.explicacion ? `Explicación: ${esc(d.explicacion)}\n` : ""}------------------------------
+Tarjeta: ${Number(d.n_tarjeta)} por ${esc(money(d.tarjeta))}
+Transferencia: ${Number(d.n_transferencia)} por ${esc(money(d.transferencia))}
+
+
+______________________   ______________________
+   Entrega (cajera)          Recibe (gerente)
+</div>`;
+  $("caja-modal").hidden = true;
+  $("receipt-modal").hidden = false;
+});
+
+/* --- Reportes → Turnos de caja (gerente y propietaria) ------------------------
+   Una llamada por tienda, como el tablero: el permiso se revisa en la base
+   tienda por tienda. El esperado se vuelve a calcular: si llegó una venta sin
+   conexión después del cierre, se ve contra el que había al cerrar. */
+async function cargarTurnos() {
+  if (!canManage() || !sb) return;
+  const hoy = new Date();
+  if (!$("turnos-hasta").value) $("turnos-hasta").value = localDateStr(hoy);
+  if (!$("turnos-desde").value) $("turnos-desde").value = localDateStr(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 7));
+  const body = document.querySelector("#table-turnos tbody");
+  if (!navigator.onLine) { body.innerHTML = '<tr><td colspan="8" class="hint">Sin conexión: los turnos se consultan con internet.</td></tr>'; return; }
+  const scope = reportScopeId();
+  const tiendas = scope ? STATE.locations.filter((l) => l.id === scope) : STATE.locations.filter((l) => l.active);
+  const turnos = [], fuera = [];
+  for (const l of tiendas) {
+    const { data, error } = await sb.rpc("caja_turnos", { p_location: l.id, p_desde: $("turnos-desde").value, p_hasta: $("turnos-hasta").value });
+    if (error) { body.innerHTML = `<tr><td colspan="8" class="hint">${esc(errorCaja(error))}</td></tr>`; return; }
+    data.turnos.forEach((t) => turnos.push({ ...t, tienda: l.name }));
+    if (Number(data.fuera_de_turno.ventas)) fuera.push({ tienda: l.name, ...data.fuera_de_turno });
+  }
+  turnos.sort((a, b) => (a.abierto_at < b.abierto_at ? 1 : -1));
+  const varias = tiendas.length > 1;
+  const hora = (x) => x ? new Date(x).toLocaleString([], { dateStyle: "short", timeStyle: "short" }) : "";
+  const dif = (v) => v == null ? "" : Number(v) === 0 ? "Cuadra" : `${Number(v) < 0 ? "Faltan" : "Sobran"} ${money(Math.abs(Number(v)))}`;
+
+  $("turnos-fuera").innerHTML = fuera.map((f) =>
+    `<div class="alert bad">${varias ? `${esc(f.tienda)}: ` : ""}${Number(f.ventas)} venta(s) en efectivo por ${esc(money(f.total))} sin caja abierta
+     (folios ${esc(f.folios.join(", "))}). Ese dinero no entró en ningún arqueo.</div>`).join("");
+
+  body.innerHTML = turnos.length ? "" : '<tr><td colspan="8" class="hint">No hay turnos en este periodo.</td></tr>';
+  turnos.forEach((t) => {
+    const tr = document.createElement("tr");
+    const malo = (t.diferencia != null && Number(t.diferencia) !== 0) || (t.diferencia_entrega != null && Number(t.diferencia_entrega) !== 0);
+    if (malo) tr.classList.add("row-bad");
+    const cambio = t.cerrado_at && Number(t.esperado) !== Number(t.esperado_al_cerrar);
+    const movs = (t.movimientos || []).map((m) => `${m.tipo === "retiro" ? "−" : "+"}${money(m.monto)} ${m.motivo} (${m.por})`).join("\n");
+    tr.innerHTML = `
+      <td>${varias ? `<strong>${esc(t.tienda)}</strong><br>` : ""}Abrió ${esc(t.abierto_por || "")} · ${esc(hora(t.abierto_at))}<br>
+        ${t.cerrado_at ? `Cerró ${esc(t.cerrado_por || "")} · ${esc(hora(t.cerrado_at))}` : "<strong>Abierta</strong>"}</td>
+      <td class="num">${esc(money(t.fondo))}${t.diferencia_entrega != null && Number(t.diferencia_entrega) !== 0
+        ? `<br><span class="hint">Entrega: ${esc(dif(t.diferencia_entrega))} (dejaron ${esc(money(t.fondo_anterior))})</span>` : ""}</td>
+      <td class="num">${esc(money(t.ventas_efectivo))}<br><span class="hint">${Number(t.n_efectivo)} venta(s)</span></td>
+      <td class="num" title="${esc(movs)}">+${esc(money(t.entradas))}<br>−${esc(money(t.retiros))}</td>
+      <td class="num">${esc(money(t.esperado))}${cambio ? `<br><span class="hint">Al cerrar: ${esc(money(t.esperado_al_cerrar))} (llegaron o se borraron ventas después)</span>` : ""}</td>
+      <td class="num">${t.contado == null ? "" : esc(money(t.contado))}</td>
+      <td>${t.cerrado_at ? `<strong>${esc(dif(t.diferencia))}</strong>` : ""}${t.explicacion ? `<br><span class="hint">“${esc(t.explicacion)}”</span>` : ""}</td>
+      <td></td>`;
+    const celda = tr.lastElementChild;
+    if (t.revisado_at) {
+      celda.innerHTML = `Revisó ${esc(t.revisado_por || "")}<br><span class="hint">${esc(hora(t.revisado_at))}${t.nota_revision ? ` · ${esc(t.nota_revision)}` : ""}</span>`;
+    } else if (t.cerrado_at) {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "btn ghost small"; b.textContent = "Revisar";
+      b.addEventListener("click", async () => {
+        const nota = prompt(malo ? "Nota de la revisión (qué se hizo con la diferencia):" : "Nota de la revisión (opcional):", "");
+        if (nota === null) return;
+        const { error } = await sb.rpc("caja_revisar", { p_session: t.id, p_nota: nota });
+        if (error) { alert(errorCaja(error)); return; }
+        cargarTurnos();
+      });
+      celda.appendChild(b);
+    }
+    body.appendChild(tr);
+  });
+}
+$("turnos-desde").addEventListener("change", cargarTurnos);
+$("turnos-hasta").addEventListener("change", cargarTurnos);
 
 /* ===========================================================================
    9. INVENTARIO (gerente y propietario)
@@ -1906,7 +2262,7 @@ function fillReportLocationPicker() {
   sel.value = keep || STATE.activeLocationId;
 }
 
-$("sel-report-location").addEventListener("change", () => { renderReports(); renderClosing(); cargarControlPesos(); });
+$("sel-report-location").addEventListener("change", () => { renderReports(); renderClosing(); cargarControlPesos(); cargarTurnos(); });
 
 function reportScopeId() {
   if (!isOwner()) return STATE.activeLocationId;

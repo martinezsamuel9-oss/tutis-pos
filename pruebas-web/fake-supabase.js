@@ -69,6 +69,33 @@
           { tipo: "venta", fecha: "2026-10-07T17:00:00Z", folio: 11, cajera: "Cajera Uno", clase: "manual_autorizado", peso_g: 200, autorizo: "Gerente <b>Galerías</b>", metodo: "pin", motivo: "La báscula no conecta" },
           { tipo: "venta", fecha: "2026-10-07T16:00:00Z", folio: 10, cajera: "Cajera Uno", clase: "manual_autorizado", peso_g: 150, autorizo: "Gerente Galerías", metodo: "huella", motivo: "La báscula no conecta" },
         ] }, error: null };
+      // La caja: abierta por defecto (así cobran las demás pruebas); "fake_caja"
+      // = "cerrada" la arranca cerrada. El esperado lo "calcula" el doble: 1000.
+      case "caja_estado": {
+        const abierta = localStorage.getItem("fake_caja") !== "cerrada";
+        return { data: abierta ? { abierta: true, turno: { id: "T1", abierto_por: "Cajera Uno", abierto_at: new Date().toISOString(), es_mio: true, movimientos: [] } }
+                               : { abierta: false, ultimo_cierre: null }, error: null };
+      }
+      case "caja_abrir": {
+        localStorage.setItem("fake_caja", "abierta");
+        const fondo = Object.entries(args.p_conteo).reduce((s, [v, n]) => s + Number(v) * n, 0);
+        return { data: { id: "T1", fondo, fondo_anterior: 700, diferencia_entrega: fondo - 700 }, error: null };
+      }
+      case "caja_movimiento": return { data: { abierta: true, turno: { id: "T1", abierto_por: "Cajera Uno", abierto_at: new Date().toISOString(), es_mio: true,
+                                        movimientos: [{ tipo: args.p_tipo, monto: args.p_monto, motivo: args.p_motivo }] } }, error: null };
+      case "caja_cerrar": {
+        localStorage.setItem("fake_caja", "cerrada");
+        const contado = Object.entries(args.p_conteo).reduce((s, [v, n]) => s + Number(v) * n, 0);
+        return { data: { id: "T1", fondo: 700, ventas_efectivo: 400, n_efectivo: 4, entradas: 0, retiros: 100, esperado: 1000, contado,
+                         diferencia: contado - 1000, deja_fondo: args.p_deja_fondo, tarjeta: 300, n_tarjeta: 2, transferencia: 0, n_transferencia: 0,
+                         abierto_por: "Cajera Uno", abierto_at: new Date().toISOString(), cerrado_por: "Cajera Uno", cerrado_at: new Date().toISOString() }, error: null };
+      }
+      case "caja_explicar": case "caja_revisar": return { data: null, error: null };
+      case "caja_turnos": return { data: { turnos: [
+          { id: "T9", abierto_por: "<b>Ana</b>", abierto_at: "2026-10-27T14:00:00Z", cerrado_por: "Bea", cerrado_at: "2026-10-27T20:00:00Z",
+            fondo: 650, fondo_anterior: 700, diferencia_entrega: -50, contado: 980, esperado_al_cerrar: 1000, esperado: 1040, diferencia: -20,
+            explicacion: "Di mal un vuelto", ventas_efectivo: 400, n_efectivo: 4, entradas: 0, retiros: 100, movimientos: [] }],
+          fuera_de_turno: { ventas: 1, total: 25, folios: [27] } }, error: null };
       default: return { data: null, error: { message: "no simulado: " + name, code: "X" } };
     }
   }

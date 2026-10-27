@@ -210,6 +210,20 @@
     <section id="tab-venta" class="tab-panel active">
       <div class="grid-2">
         <div>
+          <div class="card caja-card no-print" id="caja-card" hidden>
+            <div class="scale-head">
+              <div>
+                <div class="scale-label">Caja</div>
+                <div class="caja-estado" id="caja-estado">—</div>
+                <div class="hint" id="caja-detalle"></div>
+              </div>
+              <div class="scale-actions">
+                <button class="btn primary small" id="btn-caja-abrir" type="button" hidden>Abrir caja</button>
+                <button class="btn ghost small" id="btn-caja-mov" type="button" hidden>Retiro o entrada</button>
+                <button class="btn ghost small" id="btn-caja-cerrar" type="button" hidden>Cerrar o entregar caja</button>
+              </div>
+            </div>
+          </div>
           <div class="card scale-card no-print" id="scale-card">
             <div class="scale-head">
               <div>
@@ -677,6 +691,21 @@
         <div class="kpi-grid" id="report-summary"></div>
       </div>
 
+      <div class="card" id="turnos-card">
+        <h2>Turnos de caja</h2>
+        <div class="sub">
+          Cada apertura y cierre de la caja. La cajera cuenta sin ver cuánto debería haber; lo esperado lo calcula el
+          sistema con el fondo, las ventas en efectivo, las entradas y los retiros del turno.
+        </div>
+        <div class="field no-print"><label for="turnos-desde">Desde</label><input type="date" id="turnos-desde"></div>
+        <div class="field no-print"><label for="turnos-hasta">Hasta</label><input type="date" id="turnos-hasta"></div>
+        <div id="turnos-fuera"></div>
+        <div class="table-wrap"><table class="data" id="table-turnos">
+          <thead><tr><th>Turno</th><th>Fondo</th><th>Ventas en efectivo</th><th>Entradas / retiros</th><th>Esperado</th><th>Contado</th><th>Diferencia</th><th>Revisión</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+
       <div class="card closing-card">
         <h2>Cierre del día</h2>
         <div class="closing-print-head" id="closing-print-head"></div>
@@ -901,6 +930,53 @@
     <div class="modal-actions no-print">
       <button class="btn ghost" id="btn-close-receipt">Cerrar</button>
       <button class="btn primary" id="btn-print-receipt" type="button">Imprimir</button>
+    </div>
+  </div>
+</div>
+
+<!-- ======================= CAJA: ABRIR, CERRAR, MOVIMIENTOS ======================= -->
+<div class="modal-overlay" id="caja-modal" hidden>
+  <div class="modal-box">
+    <h2 id="caja-titulo"></h2>
+    <p class="sub" id="caja-sub"></p>
+    <div id="caja-conteo-area">
+      <div class="conteo-grid" id="caja-conteo"></div>
+      <div class="conteo-total">Contaste <strong class="num" id="caja-contado">0.00</strong></div>
+    </div>
+    <div id="caja-fondo-area" hidden>
+      <div class="field stack"><label for="caja-deja">¿Cuánto dinero queda en la gaveta?</label>
+        <input id="caja-deja" type="number" min="0" step="0.01" inputmode="decimal"></div>
+      <p class="hint">
+        Si entregas a otra cajera, queda todo. Si es el cierre del día, escribe el fondo que queda para mañana:
+        lo demás va al depósito o a la caja fuerte.
+        <button class="btn ghost small" id="btn-caja-queda-todo" type="button">Queda todo</button>
+      </p>
+    </div>
+    <div id="caja-mov-area" hidden>
+      <div class="field"><label for="caja-mov-tipo">Movimiento</label>
+        <select id="caja-mov-tipo"><option value="retiro">Retiro: sale dinero de la gaveta</option><option value="entrada">Entrada: entra dinero a la gaveta</option></select></div>
+      <div class="field"><label for="caja-mov-monto">Monto</label><input id="caja-mov-monto" type="number" min="0.01" step="0.01" inputmode="decimal"></div>
+      <div class="field stack"><label for="caja-mov-motivo">Motivo</label>
+        <select id="caja-mov-motivo">
+          <option>A la caja fuerte</option>
+          <option>Pago en efectivo a un proveedor</option>
+          <option>Cambio (monedas o billetes pequeños)</option>
+          <option value="otro">Otro…</option>
+        </select>
+        <input type="text" id="caja-mov-otro" placeholder="Explica el motivo" maxlength="200" hidden>
+      </div>
+    </div>
+    <div id="caja-resultado" hidden></div>
+    <div id="caja-explicar-area" hidden>
+      <div class="field stack"><label for="caja-explicacion">¿Por qué no cuadra? (lo lee la gerente)</label>
+        <input type="text" id="caja-explicacion" maxlength="300"></div>
+      <button class="btn ghost small" id="btn-caja-explicar" type="button">Guardar explicación</button>
+    </div>
+    <p class="hint" id="caja-msg"></p>
+    <div class="modal-actions">
+      <button class="btn ghost" id="btn-caja-cancelar" type="button">Cancelar</button>
+      <button class="btn ghost" id="btn-caja-imprimir" type="button" hidden>Imprimir comprobante</button>
+      <button class="btn primary" id="btn-caja-ok" type="button">Guardar</button>
     </div>
   </div>
 </div>

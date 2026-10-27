@@ -429,6 +429,93 @@ const texto = (page, sel) => page.locator(sel).innerText();
   await ctx.close();
 }
 
+/* ---------------- La caja: abrir, retiro, cierre ciego ---------------- */
+{
+  const { ctx, page, errores } = await abrir("cajera");
+  await page.evaluate(() => {
+    localStorage.setItem("fake_caja", "cerrada");
+    localStorage.setItem("fake_products", JSON.stringify([{ id: "P1", location_id: "L1", family: "Bebidas", name: "Agua en botella", price: 25, cost: 8, stock_qty: null, upsell: null, active: true }]));
+  });
+  await page.reload(); await page.waitForSelector("#app:not([hidden])");
+  await page.waitForFunction(() => document.querySelector("#caja-estado").textContent === "Caja cerrada");
+  ok(await page.isVisible("#btn-caja-abrir") && !(await page.isVisible("#btn-caja-cerrar")), "40 la cajera ve la caja cerrada y el botón para abrirla");
+  await page.click('#product-tiles .tile:has-text("Agua en botella")');
+  page.once("dialog", (d) => d.accept());
+  await page.click("#btn-charge");
+  await page.waitForSelector("#caja-modal:not([hidden])");
+  ok((await rpcs(page, "process_sale")).length === 0, "40b con la caja cerrada no se cobra: primero se abre");
+  await page.fill('#caja-conteo input[data-den="500"]', "1");
+  await page.fill('#caja-conteo input[data-den="100"]', "1");
+  await page.fill('#caja-conteo input[data-den="0.5"]', "2");
+  ok((await texto(page, "#caja-contado")).includes("601.00"), "40c el conteo se suma billete por billete (lo que ella contó)");
+  await page.click("#btn-caja-ok");
+  await page.waitForFunction(() => document.querySelector("#caja-resultado").textContent.includes("dejó"));
+  const ab = (await rpcs(page, "caja_abrir")).pop().args;
+  ok(ab.p_conteo["500"] === 1 && ab.p_conteo["0.5"] === 2 && !("200" in ab.p_conteo), "40d a la base va el conteo por denominación, sin las vacías");
+  ok((await texto(page, "#caja-resultado")).includes("faltan"), "40e si no coincide con lo que dejó el turno anterior, se lo dice al abrir");
+  await page.click("#btn-caja-cancelar");
+  await page.waitForFunction(() => document.querySelector("#caja-estado").textContent === "Caja abierta");
+  await page.click("#btn-charge");
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem("fake_rpcs") || "[]").some((x) => x.name === "process_sale"));
+  ok(true, "40f con la caja abierta, cobra");
+  await page.click("#btn-close-receipt");
+
+  await page.click("#btn-caja-mov");
+  await page.fill("#caja-mov-monto", "100");
+  await page.selectOption("#caja-mov-motivo", "otro");
+  await page.click("#btn-caja-ok");
+  ok((await texto(page, "#caja-msg")).includes("motivo") && (await rpcs(page, "caja_movimiento")).length === 0, "41 un retiro sin motivo no se guarda");
+  await page.fill("#caja-mov-otro", "Pago al del hielo");
+  await page.click("#btn-caja-ok");
+  await page.waitForSelector("#caja-modal", { state: "hidden" });
+  const mv = (await rpcs(page, "caja_movimiento")).pop().args;
+  ok(mv.p_tipo === "retiro" && mv.p_monto === 100 && mv.p_motivo === "Pago al del hielo", "41b retiro de 100 con su motivo");
+
+  await page.click("#btn-caja-cerrar");
+  await page.waitForSelector("#caja-modal:not([hidden])");
+  ok(!/esperado|debería haber\s*L|1000/i.test(await texto(page, "#caja-modal")), "42 al cerrar, la pantalla NO dice cuánto debería haber");
+  await page.fill('#caja-conteo input[data-den="500"]', "1");
+  await page.fill('#caja-conteo input[data-den="200"]', "2");
+  await page.fill('#caja-conteo input[data-den="50"]', "1");
+  await page.click("#btn-caja-ok");
+  ok((await texto(page, "#caja-msg")).includes("queda en la gaveta"), "42b hay que decir cuánto queda de fondo");
+  await page.click("#btn-caja-queda-todo");
+  ok((await page.inputValue("#caja-deja")) === "950.00", "42c \"Queda todo\" pone lo contado");
+  await page.fill("#caja-deja", "700");
+  page.once("dialog", (d) => d.accept());
+  await page.click("#btn-caja-ok");
+  await page.waitForSelector("#caja-resultado:not([hidden])");
+  const res = await texto(page, "#caja-resultado");
+  ok(res.includes("Faltan") && res.includes("50.00") && res.includes("1000.00") && await page.isVisible("#caja-explicar-area"),
+     "42d después de guardar el conteo sí se ve lo esperado y la diferencia, y se pide explicación", res);
+  await page.fill("#caja-explicacion", "Di mal un vuelto");
+  await page.click("#btn-caja-explicar");
+  await page.waitForFunction(() => document.querySelector("#caja-msg").textContent.includes("guardada"));
+  ok((await rpcs(page, "caja_explicar")).pop().args.p_texto === "Di mal un vuelto", "42e la explicación llega a la base");
+  await page.click("#btn-caja-imprimir");
+  const comp = await texto(page, "#receipt-body");
+  ok(comp.includes("ARQUEO DE CAJA") && comp.includes("× 2") && comp.includes("Recibe (gerente)") && !/innova504/i.test(comp),
+     "42f comprobante del arqueo con el conteo y espacio para firmas");
+  ok(errores.length === 0, "43 sin errores de JavaScript (caja)", errores);
+  await ctx.close();
+}
+{
+  const { ctx, page, errores } = await abrir("gerente");
+  await page.click('.tab-btn[data-tab="reportes"]');
+  await page.waitForSelector("#table-turnos tbody tr td:nth-child(7)");
+  const html = await page.locator("#table-turnos").innerHTML();
+  const t = await texto(page, "#table-turnos");
+  ok(t.includes("Faltan") && t.includes("20.00") && t.includes("Entrega") && t.includes("Al cerrar") && html.includes("&lt;b&gt;Ana"),
+     "44 la gerente ve el turno con faltante, diferencia de entrega, el esperado que cambió, y los nombres escapados", t);
+  ok((await texto(page, "#turnos-fuera")).includes("sin caja abierta"), "44b avisa las ventas en efectivo que no cayeron en ningún turno");
+  page.once("dialog", (d) => d.accept("Hablado con Ana"));
+  await page.click('#table-turnos button:has-text("Revisar")');
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem("fake_rpcs") || "[]").some((x) => x.name === "caja_revisar"));
+  ok((await rpcs(page, "caja_revisar")).pop().args.p_nota === "Hablado con Ana", "44c la gerente revisa el cierre con nota");
+  ok(errores.filter((e) => !/no simulado/.test(e)).length === 0, "44d sin errores de JavaScript (turnos)", errores);
+  await ctx.close();
+}
+
 /* ---------------- Costo y margen: solo la propietaria ---------------- */
 {
   const g = await abrir("gerente");
