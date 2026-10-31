@@ -79,6 +79,7 @@ sql/21_cierre_formas_pago.sql cierre como ICG: pre-cierre del datáfono, lote, y
 sql/22_clientes.sql         clientes: el teléfono es la llave, ficha completa, categorías, cifras y cumpleaños
 sql/23_inventario.sql       inventario diario, recetas, fabricación, descuento por venta y cuadre (ver 3.13)
 sql/24_inventario_catalogo.sql catálogo de arranque del Excel del negocio: máquinas, toppings, unidades y recetas
+sql/25_contable.sql         libro contable: catálogo de cuentas, diario, balanza y asientos manuales (ver 3.14)
 app-ios/           app nativa de iPhone (SwiftUI) para clientes: pedir, puntos, regalos (ver 3.9)
 sql/13_privilegios.sql      quita TRUNCATE, TRIGGER, REFERENCES y MAINTAIN (PG17) a anon y authenticated,
                             también para las tablas futuras (TRUNCATE se salta RLS)
@@ -89,7 +90,7 @@ sql/pruebas/        prueba_aislamiento.sql (13) + prueba_seguridad.sql (48 ataqu
                     + prueba_fidelizacion.sql (19) + prueba_pesos.sql (48)
                     + prueba_huella.sql (12) + prueba_compras.sql (28)
                     + prueba_productos.sql (14) + prueba_tarjeta.sql (7) + prueba_app.sql (32) + prueba_mapa.sql (32) + prueba_caja.sql (38)
-                    + prueba_cierre.sql (35) + prueba_clientes.sql (43) + prueba_inventario.sql (51)
+                    + prueba_cierre.sql (35) + prueba_clientes.sql (43) + prueba_inventario.sql (51) + prueba_contable.sql (57)
                     + borrar_datos_de_prueba.sql (quita las demostraciones)
                     + datos_de_demostracion.sql (14 días de ventas, borrables)
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
@@ -98,6 +99,7 @@ web/bascula.js      protocolo de la báscula (CAS PD-II en NCI); se prueba en No
 web/libro-ventas.js libro de ventas en el formato ICG (Excel .xlsx hecho a mano); se prueba en Node
 web/clientes.js     módulo de clientes y "¿Es cliente?" al cobrar (se carga después de app.js)
 web/inventario.js   pestaña Operación: conteo, fabricación, entradas y mermas, cuadre, catálogo y recetas
+web/contable.js     pestaña Contable: diario, mayor, balanza, resultados, asiento manual y cuentas
 caja/               modo kiosko de Chrome + cómo configurar la báscula (ver su LEEME.md)
 pruebas-web/        pruebas de la pantalla de venta con Playwright y báscula simulada
 web/styles.css      estilos, modo día/noche
@@ -666,11 +668,48 @@ deshacer:
 7. **El primer día no cuadra nada**: sin conteo anterior el inicial es 0, y
    la pantalla lo dice.
 8. **Los scripts comparten el ámbito global**: `inventario.js` pisó
-   `pintarConteo` (caja) y `pintarMovimientos` (clientes) sin dar error.
-   La prueba 0 de `prueba_caja.mjs` revisa que no se repita ningún nombre.
+   `pintarConteo` (caja) y `pintarMovimientos` (clientes) sin dar error, y
+   `contable.js` iba a pisar `fechaCorta`. La prueba 0 de `prueba_caja.mjs`
+   revisa que no se repita ningún nombre; en contable.js todo empieza con
+   `cont`/`CONT`.
 9. Pendiente de confirmar con el negocio: los nombres de las recetas de
    venta contra los productos reales de la caja, y las inconsistencias del
    Excel (ver las notas de cada receta en sql/24).
+
+## 3.14 Libro contable (sql/25 + web/contable.js)
+
+Pedido del negocio (2026-10-30), dentro de las mejoras sobre ICG. Pestaña
+**Contable** (gerencia de su tienda, contabilidad, propietaria): diario,
+mayor, balanza de comprobación, estado de resultados, asiento manual y
+catálogo de cuentas, con Excel. Lo que no hay que deshacer:
+
+1. **Los asientos automáticos NO se guardan: se calculan de su fuente**
+   (`cont_movimientos`, interna): ventas del día por forma de pago, costo de
+   lo vendido, compras, retiros/entradas de la gaveta y diferencias de
+   arqueo. Guardarlos sería tener el número en dos lugares; una venta sin
+   conexión que sube tarde o una compra corregida los descuadraría.
+2. **El ISV de las ventas se separa factura por factura** (total/1.15 a
+   centavos), igual que el libro de ventas: los dos cuadran al centavo.
+   El canje de puntos va como "Descuentos por canje" contra Ventas.
+3. **Los automáticos buscan su cuenta por `clave`, no por código.** El
+   contador recodifica el catálogo sin romper nada; una cuenta con clave no
+   cambia de tipo ni se apaga.
+4. **Los asientos manuales cuadran o no entran, y no se editan ni se
+   borran**: se anulan con motivo (queda en `audit_log` y en la lista de
+   anulados del diario) y se hace otro.
+5. **Gastos vs. compras CTG**: por defecto el libro toma las facturas de
+   Compras (traen RTN e ISV) y NO la pestaña Gastos, porque suelen ser lo
+   mismo y saldrían dos veces. `cont_config.incluir_gastos` lo cambia (solo
+   propietaria o contabilidad de todas), con aviso en pantalla.
+6. **Por tienda, no consolidado**, más el libro de la **oficina**
+   (`location_id` null: compras sin tienda y asientos de oficina), que solo
+   ven la propietaria y contabilidad de todas. Así no se suman monedas.
+7. **No es contabilidad fiscal** y la pantalla lo dice. El fondo de la
+   gaveta, el pago a proveedores y el depósito del datáfono no los ve el
+   sistema: van como asiento manual (por eso caja puede quedar negativa en
+   el libro si nadie asienta el fondo inicial).
+8. Año fiscal de enero a diciembre: el saldo anterior de ingresos, costos y
+   gastos arranca el 1 de enero.
 
 ## 4. Restricciones permanentes (pedidas explícitamente)
 
@@ -841,6 +880,7 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/21_cierre_formas_pago.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/22_clientes.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/23_inventario.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/24_inventario_catalogo.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/25_contable.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_aislamiento.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_seguridad.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_fidelizacion.sql
@@ -855,6 +895,7 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_caja.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_cierre.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_clientes.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_inventario.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_contable.sql
 ```
 
 `00_simulacion_supabase.sql` recrea lo que Supabase ya trae (schema `auth`,

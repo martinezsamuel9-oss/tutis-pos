@@ -66,6 +66,7 @@
         <button class="tab-btn" data-tab="clientes" data-min-role="gerente">Clientes</button>
         <button class="tab-btn" data-tab="gastos" data-min-role="gerente">Gastos</button>
         <button class="tab-btn" data-tab="compras" data-min-role="gerente">Compras</button>
+        <button class="tab-btn" data-tab="contable">Contable</button>
         <button class="tab-btn" data-tab="reportes" data-min-role="gerente">Reportes</button>
         <button class="tab-btn" data-tab="config" data-min-role="gerente">Configuración</button>
         <button class="tab-btn" data-tab="admin" data-min-role="propietario">Sucursales y usuarios</button>
@@ -933,6 +934,101 @@
       </div>
     </section>
 
+    <!-- ===================== CONTABLE ===================== -->
+    <section id="tab-contable" class="tab-panel">
+      <div class="card no-print">
+        <h2>Libro contable</h2>
+        <div class="sub">
+          Los asientos de ventas, costo, compras, caja y arqueos salen solos de lo que ya está en el sistema;
+          lo demás (pago a proveedores, depósito del datáfono, planilla) se registra como asiento manual.
+          Es el libro de la operación para el contador, no la contabilidad fiscal.
+        </div>
+        <div class="filter-bar">
+          <div class="field stack"><label for="cont-location">Libro de</label><select id="cont-location"></select></div>
+          <div class="field stack"><label for="cont-desde">Desde</label><input type="date" id="cont-desde"></div>
+          <div class="field stack"><label for="cont-hasta">Hasta</label><input type="date" id="cont-hasta"></div>
+          <button class="btn ghost" id="btn-cont-ver" type="button">Actualizar</button>
+          <button class="btn primary" id="btn-cont-excel" type="button">Descargar Excel</button>
+        </div>
+        <div class="unit-seg op-seg" id="cont-seg" role="tablist">
+          <button type="button" data-cont="diario" class="active">Diario</button>
+          <button type="button" data-cont="mayor">Mayor</button>
+          <button type="button" data-cont="balanza">Balanza</button>
+          <button type="button" data-cont="resultados">Resultados</button>
+          <button type="button" data-cont="asiento">Asiento manual</button>
+          <button type="button" data-cont="cuentas">Cuentas</button>
+        </div>
+        <p class="hint" id="cont-msg"></p>
+      </div>
+
+      <div class="cont-panel card" data-cont-panel="diario">
+        <h2>Libro diario</h2>
+        <div id="cont-diario-avisos"></div>
+        <div class="table-wrap"><table class="data" id="table-diario">
+          <thead><tr><th>Fecha</th><th>Asiento</th><th>Código</th><th>Cuenta</th><th class="num">Debe</th><th class="num">Haber</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <div id="cont-anulados"></div>
+      </div>
+
+      <div class="cont-panel card" data-cont-panel="mayor" hidden>
+        <h2>Libro mayor</h2>
+        <div class="field stack"><label for="cont-mayor-cuenta">Cuenta</label><select id="cont-mayor-cuenta"></select></div>
+        <div class="table-wrap"><table class="data" id="table-mayor">
+          <thead><tr><th>Fecha</th><th>Asiento</th><th class="num">Debe</th><th class="num">Haber</th><th class="num">Saldo</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+
+      <div class="cont-panel card" data-cont-panel="balanza" hidden>
+        <h2>Balanza de comprobación</h2>
+        <div class="sub">El saldo anterior de ingresos, costos y gastos arranca el 1 de enero; el de activo, pasivo y patrimonio, desde el inicio.</div>
+        <div class="table-wrap"><table class="data" id="table-balanza">
+          <thead><tr><th>Código</th><th>Cuenta</th><th class="num">Saldo anterior</th><th class="num">Debe</th><th class="num">Haber</th><th class="num">Saldo deudor</th><th class="num">Saldo acreedor</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
+
+      <div class="cont-panel card" data-cont-panel="resultados" hidden>
+        <h2>Estado de resultados</h2>
+        <div class="sub" id="cont-res-sub"></div>
+        <div class="table-wrap"><table class="data" id="table-resultados"><tbody></tbody></table></div>
+      </div>
+
+      <div class="cont-panel card" data-cont-panel="asiento" hidden>
+        <h2>Asiento manual</h2>
+        <div class="sub">Lo que el sistema no ve: pago a un proveedor, depósito del datáfono con su comisión, planilla, aporte de capital. Tiene que cuadrar. Un asiento no se edita ni se borra: si está mal, se anula desde el diario con el motivo y se hace otro.</div>
+        <div class="filter-bar">
+          <div class="field stack"><label for="as-fecha">Fecha</label><input type="date" id="as-fecha"></div>
+          <div class="field stack" style="flex:1"><label for="as-concepto">Concepto</label><input id="as-concepto" maxlength="300" placeholder="Ej. Depósito del lote 389 del datáfono"></div>
+        </div>
+        <div class="table-wrap"><table class="data" id="table-as-lineas">
+          <thead><tr><th>Cuenta</th><th>Detalle</th><th class="num">Debe</th><th class="num">Haber</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <div class="row-actions">
+          <button class="btn ghost" id="btn-as-linea" type="button">Agregar línea</button>
+          <span class="hint" id="as-totales"></span>
+        </div>
+        <button class="btn primary" id="btn-as-guardar" type="button">Guardar asiento</button>
+        <p class="hint" id="as-msg"></p>
+      </div>
+
+      <div class="cont-panel card" data-cont-panel="cuentas" hidden>
+        <h2>Catálogo de cuentas</h2>
+        <div class="sub">Las cuentas con <strong>automática</strong> las usan los asientos que salen solos: se les puede cambiar el código y el nombre, no el tipo ni apagarlas. El catálogo lo cambian la propietaria o contabilidad de todas las tiendas.</div>
+        <button class="btn ghost" id="btn-cta-nueva" type="button">Nueva cuenta</button>
+        <div class="table-wrap"><table class="data" id="table-cuentas">
+          <thead><tr><th>Código</th><th>Nombre</th><th>Tipo</th><th>Uso</th><th>Activa</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <p class="hint" id="cta-msg"></p>
+        <h3>Gastos de la pestaña Gastos</h3>
+        <label class="check"><input type="checkbox" id="cont-incluir-gastos"> Llevar al libro los gastos de la pestaña Gastos</label>
+        <p class="hint">Apagado (como viene), los gastos entran por las facturas de Compras (CTG), que traen RTN e ISV. Enciéndalo solo si los gastos no se registran también como compra: si no, saldrían dos veces.</p>
+      </div>
+    </section>
+
     <!-- ===================== REPORTES ===================== -->
     <section id="tab-reportes" class="tab-panel">
       <div class="card no-print" id="owner-location-picker" hidden>
@@ -1360,5 +1456,6 @@
 <script src="app.js"></script>
 <script src="clientes.js"></script>
 <script src="inventario.js"></script>
+<script src="contable.js"></script>
 </body>
 </html>

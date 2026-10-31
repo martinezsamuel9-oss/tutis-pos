@@ -636,3 +636,17 @@ table.data tr.low-stock td { background: var(--danger-bg); }
   #tab-operacion .op-tabla input { border: none; background: none; }
   #tab-operacion .op-seg, #tab-operacion .op-panel:not([data-op-panel="conteo"]) { display: none !important; }
 }
+
+/* --- Libro contable -------------------------------------------------------------- */
+#table-diario tr.asiento-ini td { border-top: 2px solid var(--border); }
+#table-diario td.cont-haber { padding-left: 32px; }   /* el haber va con sangría, como en el libro */
+#table-resultados th { text-align: left; padding-top: 14px; }
+#table-resultados td.cont-sangria { padding-left: 28px; }
+#table-resultados tr.cont-final td { border-top: 2px solid var(--ink); font-size: 1.05rem; }
+#tab-contable table.data td.num, #tab-contable table.data th.num, #tab-operacion table.data td.num { text-align: right; white-space: nowrap; }
+#table-as-lineas select, #table-cuentas select, #table-rec-lineas select, #table-cat select {
+  width: 100%; min-width: 90px; padding: 6px 8px; border-radius: var(--radius-s);
+  border: 1px solid var(--border); background: var(--bg); color: var(--ink); font-size: 0.85rem;
+}
+#tab-contable .row-actions { align-items: center; gap: 12px; margin: 10px 0 14px; }
+#table-as-lineas td:first-child { min-width: 240px; }

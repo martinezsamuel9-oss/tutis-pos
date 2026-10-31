@@ -19,12 +19,12 @@ function ok(cond, msg, extra) {
 // nombre en dos archivos pisa a la otra sin dar error (pasó con pintarConteo).
 {
   const nombres = {};
-  ["app.js", "clientes.js", "inventario.js"].forEach((f) => {
+  ["app.js", "clientes.js", "inventario.js", "contable.js"].forEach((f) => {
     const src = fs.readFileSync(path.join(AQUI, "..", "web", f), "utf8");
     for (const m of src.matchAll(/^(?:async )?function ([A-Za-z0-9_]+)|^(?:const|let|var) ([A-Za-z0-9_]+)/gm)) (nombres[m[1] || m[2]] ||= []).push(f);
   });
   const repetidos = Object.entries(nombres).filter(([, fs]) => fs.length > 1);
-  ok(repetidos.length === 0, "0 ningún nombre global se repite entre app.js, clientes.js e inventario.js", repetidos);
+  ok(repetidos.length === 0, "0 ningún nombre global se repite entre app.js, clientes.js, inventario.js y contable.js", repetidos);
 }
 
 // PW_CHROME: usar otro Chromium ya instalado si el de Playwright no está.
@@ -760,6 +760,78 @@ const texto = (page, sel) => page.locator(sel).innerText();
   const mv = (await rpcs(page, "inv_movimiento")).pop().args;
   ok(mv.p_tipo === "merma" && mv.p_cantidad === 2 && mv.p_nota === "Goteo", "65a registra la merma con su motivo", mv);
   ok(errores.filter((e) => !/no simulado/.test(e)).length === 0, "65b sin errores de JavaScript (fabricación)", errores);
+  await ctx.close();
+}
+
+/* ---------------- Libro contable ---------------- */
+{
+  const { ctx, page, errores } = await abrir("gerente");
+  await page.click('.tab-btn[data-tab="contable"]');
+  await page.waitForSelector("#table-diario tbody tr.total");
+  const dHtml = await page.innerHTML("#table-diario");
+  ok(dHtml.includes("Ana &lt;b&gt;") && dHtml.includes("Depósito &lt;i&gt;lote") && (await page.innerHTML("#cont-anulados")).includes("&lt;b&gt;día"),
+     "70 el diario trae los asientos automáticos y los manuales, con los textos escapados");
+  ok((await texto(page, "#table-diario tr.total")).includes("215.00"), "70a con el total del debe y del haber");
+  ok(await page.locator("#table-diario td.cont-haber").count() === 5, "70b el haber va con sangría, como en el libro");
+  ok(await page.locator("#table-diario [data-anular]").count() === 1, "70c solo los asientos manuales se pueden anular");
+  page.once("dialog", (d) => d.accept("Era del día 31"));
+  await page.click("#table-diario [data-anular]");
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem("fake_rpcs") || "[]").some((x) => x.name === "cont_anular_asiento"));
+  const an = (await rpcs(page, "cont_anular_asiento")).pop().args;
+  ok(an.p_id === "A7" && an.p_motivo === "Era del día 31", "70d anular manda el asiento y el motivo", an);
+  await page.click('#cont-seg button[data-cont="mayor"]');
+  const may = await texto(page, "#table-mayor");
+  ok(/20\.00 D/.test(may) && /135\.00 D/.test(may) && /125\.00 D/.test(may) && /75\.00 D/.test(may), "71 el mayor de caja: saldo anterior 20, +115, −10, −50 = 75 deudor", may);
+  await page.click('#cont-seg button[data-cont="balanza"]');
+  const bal = await texto(page, "#table-balanza tr.total");
+  ok((bal.match(/175\.00/g) || []).length === 2 && (bal.match(/215\.00/g) || []).length === 2 && !(await page.isVisible("#table-balanza .alert")),
+     "72 la balanza cuadra: 215 = 215 y saldos 175 = 175", bal);
+  await page.click('#cont-seg button[data-cont="resultados"]');
+  const res = await texto(page, "#table-resultados");
+  ok(/Utilidad bruta\s+60\.00/.test(res) && /Utilidad del periodo\s+50\.00/.test(res), "73 resultados: ventas 100 − costo 40 = 60; − faltante 10 = utilidad 50", res);
+  await page.click('#cont-seg button[data-cont="asiento"]');
+  await page.fill("#as-concepto", "Pago a <b>proveedor</b>");
+  await page.selectOption('#table-as-lineas tr[data-k="0"] .as-cuenta', "K9");
+  await page.fill('#table-as-lineas tr[data-k="0"] .as-debe', "100");
+  await page.selectOption('#table-as-lineas tr[data-k="1"] .as-cuenta', "K2");
+  await page.fill('#table-as-lineas tr[data-k="1"] .as-debe', "5");
+  await page.fill('#table-as-lineas tr[data-k="1"] .as-haber', "100");
+  ok((await page.inputValue('#table-as-lineas tr[data-k="1"] .as-debe')) === "" && (await texto(page, "#as-totales")).includes("Cuadra"),
+     "74 una línea va en el debe o en el haber, y dice si cuadra");
+  await page.click("#btn-as-guardar");
+  await page.waitForFunction(() => /Asiento #8/.test(document.querySelector("#as-msg").textContent));
+  const asi = (await rpcs(page, "cont_guardar_asiento")).pop().args.p;
+  ok(asi.location_id === "L1" && asi.concepto === "Pago a <b>proveedor</b>" && asi.lineas.length === 2 && asi.lineas[0].debe === 100 && asi.lineas[1].haber === 100,
+     "74a guarda el asiento manual de la tienda", asi);
+  await page.click('#cont-seg button[data-cont="cuentas"]');
+  ok(await page.locator("#table-cuentas [data-guardar-cta]").count() === 0 && await page.isDisabled("#cont-incluir-gastos")
+     && (await page.innerHTML("#table-cuentas")).includes("Comisiones &lt;b&gt;banco"),
+     "75 la gerente ve el catálogo pero no lo cambia");
+  ok(!(await page.locator("#cont-location option").allTextContents()).some((t) => /Oficina/.test(t)), "75a la gerente no ve el libro de la oficina");
+  const [xl] = await Promise.all([page.waitForEvent("download"), page.click("#btn-cont-excel")]);
+  ok(/^libro-contable_.*\.xlsx$/.test(xl.suggestedFilename()), "76 el libro sale en Excel (diario, balanza y resultados)", xl.suggestedFilename());
+  ok(errores.filter((e) => !/no simulado/.test(e)).length === 0, "76a sin errores de JavaScript (contable)", errores);
+  await ctx.close();
+}
+{
+  const { ctx, page, errores } = await abrir("propietario");
+  await page.click('.tab-btn[data-tab="contable"]');
+  await page.waitForSelector("#table-diario tbody tr.total");
+  ok((await page.locator("#cont-location option").allTextContents()).some((t) => /Oficina/.test(t)), "77 la propietaria ve también el libro de la oficina");
+  await page.click('#cont-seg button[data-cont="cuentas"]');
+  ok(await page.isDisabled('#table-cuentas tr[data-cta="K1"] .cta-activa') && await page.isEnabled('#table-cuentas tr[data-cta="K9"] .cta-activa'),
+     "77a una cuenta automática no se puede apagar; las demás sí");
+  await page.click("#btn-cta-nueva");
+  await page.fill("#table-cuentas tr[data-cta=''] .cta-codigo", "1101");
+  await page.fill("#table-cuentas tr[data-cta=''] .cta-nombre", "Repetida");
+  await page.click("#table-cuentas tr[data-cta=''] [data-guardar-cta]");
+  await page.waitForFunction(() => document.querySelector("#cta-msg").textContent !== "");
+  ok((await texto(page, "#cta-msg")) === "Ese código ya es de otra cuenta.", "77b un código repetido se explica en palabras", await texto(page, "#cta-msg"));
+  page.once("dialog", (d) => d.accept());
+  await page.click("#cont-incluir-gastos");
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem("fake_rpcs") || "[]").some((x) => x.name === "cont_guardar_config"));
+  ok((await rpcs(page, "cont_guardar_config")).pop().args.p_incluir_gastos === true, "77c la propietaria decide si los gastos entran al libro (con aviso)");
+  ok(errores.filter((e) => !/no simulado/.test(e)).length === 0, "77d sin errores de JavaScript (contable, propietaria)", errores);
   await ctx.close();
 }
 

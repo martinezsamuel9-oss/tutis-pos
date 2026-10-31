@@ -623,6 +623,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     if (btn.dataset.tab === "venta") cargarCaja();
     if (btn.dataset.tab === "config") pintarEstadoPin();
     if (btn.dataset.tab === "operacion") abrirOperacion();
+    if (btn.dataset.tab === "contable") abrirContable();
   });
 });
 

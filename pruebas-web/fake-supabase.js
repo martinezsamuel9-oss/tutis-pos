@@ -31,6 +31,19 @@
       { id: "R2", nombre: "Malteada", tipo: "venta", rinde: null, produce_item_id: null, vende_nombre: "Malteada de <i>fresa</i>", notas: null, activo: true },
     ],
     receta_lineas: [{ receta_id: "R1", item_id: "I4", cantidad: 2 }, { receta_id: "R2", item_id: "I5", cantidad: 8 }],
+    cont_cuentas: [
+      { id: "K1", codigo: "1101", nombre: "Caja general", tipo: "activo", clave: "caja", activa: true },
+      { id: "K2", codigo: "1102", nombre: "Bancos", tipo: "activo", clave: "bancos", activa: true },
+      { id: "K3", codigo: "1201", nombre: "Inventario", tipo: "activo", clave: "inventario", activa: true },
+      { id: "K4", codigo: "2102", nombre: "ISV por pagar", tipo: "pasivo", clave: "isv_debito", activa: true },
+      { id: "K5", codigo: "3101", nombre: "Capital", tipo: "patrimonio", clave: null, activa: true },
+      { id: "K6", codigo: "4101", nombre: "Ventas", tipo: "ingreso", clave: "ventas", activa: true },
+      { id: "K7", codigo: "5101", nombre: "Costo de ventas", tipo: "costo", clave: "costo_ventas", activa: true },
+      { id: "K8", codigo: "6201", nombre: "Faltantes de caja", tipo: "gasto", clave: "faltante", activa: true },
+      { id: "K9", codigo: "6110", nombre: "Comisiones <b>banco</b>", tipo: "gasto", clave: null, activa: true },
+    ],
+    cont_config: [{ id: true, incluir_gastos: false }],
+    cont_asientos: [{ id: "A7", numero: 7 }],
     fabricaciones: [], inv_movimientos: [{ id: "M1", item_id: "I2", tipo: "merma", cantidad: -1.5, costo: 2, nota: "Se cayó", created_at: "2026-10-30T15:00:00Z" }],
   };
   // El conteo del día simulado: lo que se guarda queda en localStorage.
@@ -181,6 +194,30 @@
         consumo: [{ tipo: "producto", nombre: "Shake <b>Mora</b>", veces: 7, unidades: 7, peso_g: 0, monto: 840 },
                   { tipo: "helado", nombre: "Yogurt natural", veces: 5, unidades: 5, peso_g: 1500, monto: 600 }],
         por_dia: { "6": 7, "2": 1 }, por_hora: { "16": 6, "11": 2 }, pagos: { tarjeta: 9, efectivo: 3 } }, error: null };
+      case "cont_diario": {
+        const l = (id, codigo, nombre, debe, haber) => ({ cuenta_id: id, codigo, nombre, debe, haber });
+        return { data: { debe: 215, haber: 215, sin_cuenta: 0, asientos: [
+          { fecha: "2026-10-30", origen: "ventas", ref: "2026-10-30", concepto: "Ventas del día (1 comprobantes)", debe: 115, haber: 115,
+            lineas: [l("K1", "1101", "Caja general", 115, 0), l("K6", "4101", "Ventas", 0, 100), l("K4", "2102", "ISV por pagar", 0, 15)] },
+          { fecha: "2026-10-30", origen: "costo", ref: "2026-10-30", concepto: "Costo de lo vendido en el día", debe: 40, haber: 40,
+            lineas: [l("K7", "5101", "Costo de ventas", 40, 0), l("K3", "1201", "Inventario", 0, 40)] },
+          { fecha: "2026-10-30", origen: "arqueo", ref: "S1", concepto: "Faltante en el arqueo (cerró Ana <b>)", debe: 10, haber: 10,
+            lineas: [l("K8", "6201", "Faltantes de caja", 10, 0), l("K1", "1101", "Caja general", 0, 10)] },
+          { fecha: "2026-10-30", origen: "manual", ref: "7", concepto: "Depósito <i>lote</i>", debe: 50, haber: 50,
+            lineas: [l("K2", "1102", "Bancos", 50, 0), l("K1", "1101", "Caja general", 0, 50)] }],
+          anulados: [{ numero: 5, fecha: "2026-10-29", concepto: "Mal hecho", motivo: "Era otro <b>día</b>" }] }, error: null };
+      }
+      case "cont_balanza": {
+        const c = (id, codigo, nombre, tipo, anterior, debe, haber) => ({ cuenta_id: id, codigo, nombre, tipo, anterior, debe, haber, final: anterior + debe - haber });
+        return { data: { debe: 215, haber: 215, cuentas: [c("K1", "1101", "Caja general", "activo", 20, 115, 60), c("K2", "1102", "Bancos", "activo", 0, 50, 0),
+          c("K3", "1201", "Inventario", "activo", 0, 0, 40), c("K4", "2102", "ISV por pagar", "pasivo", 0, 0, 15),
+          c("K5", "3101", "Capital", "patrimonio", -20, 0, 0), c("K6", "4101", "Ventas", "ingreso", 0, 0, 100),
+          c("K7", "5101", "Costo de ventas", "costo", 0, 40, 0), c("K8", "6201", "Faltantes de caja", "gasto", 0, 10, 0)] }, error: null };
+      }
+      case "cont_guardar_asiento": return { data: { id: "A8", numero: 8, total: 100 }, error: null };
+      case "cont_anular_asiento": case "cont_guardar_config": return { data: null, error: null };
+      case "cont_guardar_cuenta": return args.p.codigo === "1101" && !args.p.id
+        ? { data: null, error: { message: 'duplicate key value violates unique constraint "cont_cuentas_codigo_key"' } } : { data: "K10", error: null };
       case "inv_cuadre": return { data: invCuadre(), error: null };
       case "inv_guardar_conteo": {
         const f = invFinal();
