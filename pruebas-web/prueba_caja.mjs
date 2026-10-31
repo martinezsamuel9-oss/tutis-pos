@@ -15,6 +15,18 @@ function ok(cond, msg, extra) {
   else { fallas++; console.log("[FALLA]", msg, extra === undefined ? "" : JSON.stringify(extra)); }
 }
 
+// Los scripts de la caja comparten el ámbito global: una función con el mismo
+// nombre en dos archivos pisa a la otra sin dar error (pasó con pintarConteo).
+{
+  const nombres = {};
+  ["app.js", "clientes.js", "inventario.js"].forEach((f) => {
+    const src = fs.readFileSync(path.join(AQUI, "..", "web", f), "utf8");
+    for (const m of src.matchAll(/^(?:async )?function ([A-Za-z0-9_]+)|^(?:const|let|var) ([A-Za-z0-9_]+)/gm)) (nombres[m[1] || m[2]] ||= []).push(f);
+  });
+  const repetidos = Object.entries(nombres).filter(([, fs]) => fs.length > 1);
+  ok(repetidos.length === 0, "0 ningún nombre global se repite entre app.js, clientes.js e inventario.js", repetidos);
+}
+
 // PW_CHROME: usar otro Chromium ya instalado si el de Playwright no está.
 const browser = await chromium.launch(process.env.PW_CHROME ? { executablePath: process.env.PW_CHROME } : {});
 
@@ -684,6 +696,70 @@ const texto = (page, sel) => page.locator(sel).innerText();
   ok(/^clientes_.*\.xlsx$/.test(descarga.suggestedFilename()), "57 descarga la lista en Excel", descarga.suggestedFilename());
   ok(await page.locator("#cli-reglas-card").isHidden(), "57a la gerente no ve las reglas de las categorías");
   ok(errores.filter((e) => !/no simulado/.test(e)).length === 0, "57b sin errores de JavaScript (módulo de clientes)", errores);
+  await ctx.close();
+}
+
+/* ---------------- Operación: inventario diario, fabricación y cuadre ---------------- */
+{
+  const { ctx, page, errores } = await abrir("gerente");
+  await page.click('.tab-btn[data-tab="operacion"]');
+  await page.waitForSelector("#op-conteo tr[data-item]");
+  ok((await page.innerHTML("#op-conteo")).includes("Oreo &lt;b&gt;x"), "60 el conteo trae máquinas, toppings y unidades, con los nombres escapados");
+  await page.fill('#op-conteo tr[data-item="I1"] .op-final', "40");
+  ok((await texto(page, '#op-conteo tr[data-item="I1"] .op-res')).includes("60"), "60a al teclear el final se ve el consumo (100 − 40 = 60)");
+  await page.fill('#op-conteo tr[data-item="I3"] .op-final', "28");
+  ok((await texto(page, '#op-conteo tr[data-item="I3"] .op-res')).includes("Faltan 2"), "60b por unidad: 50 − 20 vendidas = 30, contó 28 → Faltan 2 (con texto, no solo color)");
+  page.once("dialog", (d) => d.accept());
+  await page.click("#btn-op-cerrar");
+  await page.waitForFunction(() => /Falta contar/.test(document.querySelector("#op-conteo-msg").textContent));
+  const guardado = (await rpcs(page, "inv_guardar_conteo")).pop().args.p_lineas;
+  ok(guardado.length === 2 && guardado.some((l) => l.item_id === "I1" && l.final === 40), "60c guarda solo lo que cambió, antes de intentar cerrar", guardado);
+  ok((await texto(page, "#op-conteo-msg")).includes("Falta contar") && (await texto(page, "#op-estado")) !== "Cerrado", "60d no cierra con artículos sin contar");
+  await page.fill('#op-conteo tr[data-item="I2"] .op-final', "30");
+  page.once("dialog", (d) => d.accept());
+  await page.click("#btn-op-cerrar");
+  await page.waitForSelector('.op-panel[data-op-panel="cuadre"]:not([hidden])');
+  const cq = await texto(page, "#cq-resumen");
+  ok(/Faltan 4 oz/.test(cq) && cq.includes("52") && cq.includes("58"), "61 al cerrar pasa al cuadre: barra libre contra lo cobrado, «Faltan 4 oz»", cq);
+  ok((await page.innerHTML("#table-cq-otros")).includes("&lt;i&gt;fresa"), "61a el froyo que se fue en otros productos, escapado");
+  ok((await texto(page, "#op-estado")).includes("Cerrado") && await page.locator('#op-conteo .op-final[disabled]').count() === 3,
+     "61b cerrado, el conteo ya no se edita");
+  await page.click('#op-seg button[data-op="conteo"]');
+  ok(await page.isVisible("#btn-op-reabrir"), "61c la gerente puede reabrir el día");
+  await page.click('#op-seg button[data-op="cuadre"]');
+  const [xl] = await Promise.all([page.waitForEvent("download"), page.click("#btn-cq-excel")]);
+  ok(/^cuadre_.*\.xlsx$/.test(xl.suggestedFilename()), "62 el cuadre del mes sale en Excel", xl.suggestedFilename());
+  await page.click('#op-seg button[data-op="catalogo"]');
+  ok((await page.innerHTML("#rec-avisos")).includes("Malteada de &lt;i&gt;fresa"), "63 avisa qué recetas de venta no encuentran su producto en la caja");
+  ok(errores.filter((e) => !/no simulado/.test(e)).length === 0, "63a sin errores de JavaScript (operación)", errores);
+  await ctx.close();
+}
+{
+  // Fabricación, en un día abierto.
+  const { ctx, page, errores } = await abrir("operaciones");
+  ok(await page.isVisible('.tab-btn[data-tab="operacion"]') && !(await page.isVisible('.tab-btn[data-tab="venta"]')),
+     "64 Operaciones ve Operación y no Venta");
+  await page.click('.tab-btn[data-tab="operacion"]');
+  await page.waitForSelector("#op-conteo tr[data-item]");
+  await page.click('#op-seg button[data-op="fabricacion"]');
+  await page.fill("#fab-tandas", "2");
+  await page.dispatchEvent("#fab-tandas", "input");
+  ok((await page.inputValue("#fab-producido")) === "740" && (await texto(page, "#fab-preview")).includes("4 litro de Leche"),
+     "64a dos tandas: propone 740 oz y dice qué sale del inventario", await texto(page, "#fab-preview"));
+  await page.click("#btn-fab-registrar");
+  await page.waitForFunction(() => /Registrado/.test(document.querySelector("#fab-msg").textContent));
+  const fab = (await rpcs(page, "inv_fabricar")).pop().args.p;
+  ok(fab.tandas === 2 && fab.producido === 740 && fab.destino_item_id === "I1" && fab.sabor === "Vainilla", "64b registra la fabricación a la máquina, con su sabor", fab);
+  await page.click('#op-seg button[data-op="movimientos"]');
+  ok((await texto(page, "#table-mov")).includes("Se cayó"), "65 la lista de entradas y mermas del día");
+  await page.selectOption("#mov-tipo", "merma");
+  await page.fill("#mov-cantidad", "2");
+  await page.fill("#mov-nota", "Goteo");
+  await page.click("#btn-mov-registrar");
+  await page.waitForFunction(() => /Registrado/.test(document.querySelector("#mov-msg").textContent));
+  const mv = (await rpcs(page, "inv_movimiento")).pop().args;
+  ok(mv.p_tipo === "merma" && mv.p_cantidad === 2 && mv.p_nota === "Goteo", "65a registra la merma con su motivo", mv);
+  ok(errores.filter((e) => !/no simulado/.test(e)).length === 0, "65b sin errores de JavaScript (fabricación)", errores);
   await ctx.close();
 }
 

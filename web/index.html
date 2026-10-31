@@ -60,6 +60,7 @@
         <button class="tab-btn" data-tab="dashboard" data-min-role="gerente">Dashboard</button>
         <button class="tab-btn active" data-tab="venta">Venta</button>
         <button class="tab-btn" data-tab="pedidos" id="tab-btn-pedidos">Pedidos app <span class="tab-badge" id="pedidos-badge" hidden>0</span></button>
+        <button class="tab-btn" data-tab="operacion">Operación</button>
         <button class="tab-btn" data-tab="inventario" data-min-role="gerente">Inventario</button>
         <button class="tab-btn" data-tab="toppings" data-min-role="gerente">Toppings</button>
         <button class="tab-btn" data-tab="clientes" data-min-role="gerente">Clientes</button>
@@ -462,6 +463,184 @@
     </section>
 
 
+
+    <!-- ===================== OPERACIÓN: inventario diario, fabricación y cuadre ===================== -->
+    <section id="tab-operacion" class="tab-panel">
+      <div class="card no-print">
+        <h2>Inventario diario</h2>
+        <div class="sub">Como el Excel de control: máquinas, barra de toppings y artículos por unidad. El inicial es el conteo anterior; lo fabricado, lo sumado, las compras y las mermas salen de lo que se registra; lo vendido, de la caja.</div>
+        <div class="filter-bar">
+          <div class="field stack" id="op-location-field" hidden><label for="op-location">Tienda</label><select id="op-location"></select></div>
+          <div class="field stack"><label for="op-fecha">Día</label><input type="date" id="op-fecha"></div>
+          <div class="field"><span class="cat-badge" id="op-estado"></span></div>
+        </div>
+        <div class="unit-seg op-seg" id="op-seg" role="tablist">
+          <button type="button" data-op="conteo" class="active">Conteo</button>
+          <button type="button" data-op="fabricacion">Fabricación</button>
+          <button type="button" data-op="movimientos">Entradas y mermas</button>
+          <button type="button" data-op="cuadre">Cuadre</button>
+          <button type="button" data-op="catalogo" id="op-seg-catalogo">Catálogo y recetas</button>
+        </div>
+        <p class="hint" id="op-msg"></p>
+      </div>
+
+      <div class="op-panel" data-op-panel="conteo">
+        <div class="card">
+          <h2>Conteo del día</h2>
+          <div class="sub" id="op-conteo-sub"></div>
+          <div class="filter-bar no-print">
+            <div class="field stack"><label for="op-buscar">Buscar artículo</label><input id="op-buscar" placeholder="Ej. fresas" autocomplete="off"></div>
+            <div class="field"><label class="check"><input type="checkbox" id="op-solo-faltan"> Solo lo que falta contar</label></div>
+          </div>
+          <div id="op-conteo"></div>
+          <div class="filter-bar no-print" style="margin-top:12px;">
+            <button class="btn primary" id="btn-op-guardar" type="button">Guardar conteo</button>
+            <button class="btn" id="btn-op-cerrar" type="button">Cerrar el día</button>
+            <button class="btn ghost" id="btn-op-reabrir" type="button" hidden>Reabrir</button>
+            <button class="btn ghost" id="btn-op-imprimir" type="button">Imprimir</button>
+          </div>
+          <p class="hint" id="op-conteo-msg"></p>
+        </div>
+      </div>
+
+      <div class="op-panel" data-op-panel="fabricacion" hidden>
+        <div class="card">
+          <h2>Fabricar</h2>
+          <div class="sub">Lo fabricado entra a la máquina (o a donde vaya) y la materia prima sale del inventario, según la receta.</div>
+          <div class="filter-bar">
+            <div class="field stack"><label for="fab-receta">Receta</label><select id="fab-receta"></select></div>
+            <div class="field stack"><label for="fab-tandas">Tandas</label><input type="number" id="fab-tandas" min="0.25" step="0.25" value="1"></div>
+            <div class="field stack" id="fab-destino-field"><label for="fab-destino">Va a</label><select id="fab-destino"></select></div>
+            <div class="field stack"><label for="fab-sabor">Sabor</label><input id="fab-sabor" autocomplete="off"></div>
+            <div class="field stack"><label for="fab-producido">Salió (<span id="fab-unidad">oz</span>)</label><input type="number" id="fab-producido" min="0" step="0.1"></div>
+            <div class="field stack"><label for="fab-nota">Nota</label><input id="fab-nota" maxlength="500" autocomplete="off"></div>
+          </div>
+          <div class="alert" id="fab-preview"></div>
+          <button class="btn primary" id="btn-fab-registrar" type="button">Registrar fabricación</button>
+          <p class="hint" id="fab-msg"></p>
+        </div>
+        <div class="card">
+          <h2>Fabricado este día</h2>
+          <div class="table-wrap"><table class="data" id="table-fab">
+            <thead><tr><th>Hora</th><th>Receta</th><th>Tandas</th><th>Va a</th><th>Sabor</th><th>Salió</th><th>Por</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div class="op-panel" data-op-panel="movimientos" hidden>
+        <div class="card">
+          <h2>Entradas y mermas</h2>
+          <div class="sub">Compras, traspasos de bodega, lo que se suma a la barra, mermas e invitaciones. Las ventas no se anotan aquí: salen solas de la caja.</div>
+          <div class="filter-bar">
+            <div class="field stack"><label for="mov-item">Artículo</label><select id="mov-item"></select></div>
+            <div class="field stack"><label for="mov-tipo">Qué fue</label>
+              <select id="mov-tipo">
+                <option value="sumado">Sumado a la barra o a la máquina</option>
+                <option value="compra">Compra</option>
+                <option value="traspaso_entrada">Traspaso que entra (de bodega)</option>
+                <option value="traspaso_salida">Traspaso que sale</option>
+                <option value="merma">Merma</option>
+                <option value="invitacion">Invitación (regalado)</option>
+                <option value="ajuste">Ajuste (+ o −)</option>
+              </select></div>
+            <div class="field stack"><label for="mov-cantidad">Cantidad (<span id="mov-unidad">oz</span>)</label><input type="number" id="mov-cantidad" step="0.1"></div>
+            <div class="field stack"><label for="mov-nota">Motivo o nota</label><input id="mov-nota" maxlength="300" autocomplete="off"></div>
+          </div>
+          <button class="btn primary" id="btn-mov-registrar" type="button">Registrar</button>
+          <p class="hint" id="mov-msg"></p>
+        </div>
+        <div class="card">
+          <h2>Movimientos de este día</h2>
+          <div class="filter-bar"><div class="field"><label class="check"><input type="checkbox" id="mov-ver-ventas"> Ver también lo que descontaron las ventas y la fabricación</label></div></div>
+          <div class="table-wrap"><table class="data" id="table-mov">
+            <thead><tr><th>Hora</th><th>Artículo</th><th>Qué fue</th><th>Cantidad</th><th>Valor</th><th>Nota</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div class="op-panel" data-op-panel="cuadre" hidden>
+        <div class="card">
+          <h2>Cuadre del día</h2>
+          <div class="sub" id="cq-sub"></div>
+          <div id="cq-alerta"></div>
+          <div class="cuadre-grid" id="cq-resumen"></div>
+        </div>
+        <div class="chart-grid-2">
+          <div class="card">
+            <h2>Froyo y toppings en otros productos</h2>
+            <div class="table-wrap"><table class="data" id="table-cq-otros">
+              <thead><tr><th>Producto</th><th>Qué</th><th>Onzas</th></tr></thead><tbody></tbody>
+            </table></div>
+          </div>
+          <div class="card">
+            <h2>Artículos por unidad</h2>
+            <div class="table-wrap"><table class="data" id="table-cq-unid">
+              <thead><tr><th>Artículo</th><th>Debería haber</th><th>Hay</th><th>Diferencia</th><th>Valor</th></tr></thead><tbody></tbody>
+            </table></div>
+          </div>
+        </div>
+        <div class="card no-print">
+          <h2>Cuadre de varios días</h2>
+          <div class="filter-bar">
+            <div class="field stack"><label for="cq-desde">Desde</label><input type="date" id="cq-desde"></div>
+            <div class="field stack"><label for="cq-hasta">Hasta</label><input type="date" id="cq-hasta"></div>
+            <button class="btn ghost" id="btn-cq-rango" type="button">Ver</button>
+            <button class="btn ghost" id="btn-cq-excel" type="button">Descargar Excel</button>
+          </div>
+          <div class="table-wrap"><table class="data" id="table-cq-rango">
+            <thead><tr><th>Día</th><th>Estado</th><th>Máquinas</th><th>Froyo barra</th><th>Toppings barra</th><th>Consumo barra</th><th>Vendido</th><th>Tazas</th><th>Diferencia</th><th>Litros</th><th>%</th></tr></thead>
+            <tbody></tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div class="op-panel" data-op-panel="catalogo" hidden>
+        <div class="card">
+          <h2>Artículos</h2>
+          <div class="sub">El catálogo es de la marca: lo usan las dos tiendas. Lo cambian la propietaria y operaciones de todas las tiendas.</div>
+          <div class="filter-bar">
+            <div class="field stack"><label for="cat-buscar">Buscar</label><input id="cat-buscar" autocomplete="off"></div>
+            <div class="field stack"><label for="cat-tipo">Tipo</label><select id="cat-tipo"><option value="">Todos</option></select></div>
+            <button class="btn ghost" id="btn-cat-nuevo" type="button">+ Artículo nuevo</button>
+          </div>
+          <div class="table-wrap"><table class="data" id="table-cat">
+            <thead><tr><th>Nombre</th><th>Tipo</th><th>Unidad</th><th>Costo</th><th>Familia</th><th>Máq.</th><th>Lado</th><th>Sabor</th><th>Diario</th><th>Activo</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table></div>
+          <p class="hint" id="cat-msg"></p>
+        </div>
+        <div class="card">
+          <h2>Recetas</h2>
+          <div class="sub">Las de <strong>fabricación</strong> dicen qué materia prima usa una tanda y cuánto rinde. Las de <strong>venta</strong> descuentan del inventario cada vez que la caja vende ese producto (por el nombre con que se vende).</div>
+          <div id="rec-avisos"></div>
+          <div class="filter-bar">
+            <div class="field stack"><label for="rec-sel">Receta</label><select id="rec-sel"></select></div>
+            <button class="btn ghost" id="btn-rec-nueva" type="button">+ Receta nueva</button>
+          </div>
+          <div id="rec-editor" hidden>
+            <div class="filter-bar">
+              <div class="field stack"><label for="rec-nombre">Nombre</label><input id="rec-nombre"></div>
+              <div class="field stack"><label for="rec-tipo">Tipo</label><select id="rec-tipo"><option value="venta">Venta</option><option value="fabricacion">Fabricación</option></select></div>
+              <div class="field stack rec-venta"><label for="rec-vende">Se vende en la caja como</label><input id="rec-vende" list="rec-nombres-caja"><datalist id="rec-nombres-caja"></datalist></div>
+              <div class="field stack rec-fab"><label for="rec-rinde">Rinde por tanda</label><input type="number" id="rec-rinde" min="0" step="0.1"></div>
+              <div class="field stack rec-fab"><label for="rec-produce">Produce</label><select id="rec-produce"></select></div>
+              <div class="field"><label class="check"><input type="checkbox" id="rec-activo"> Activa</label></div>
+            </div>
+            <div class="field stack"><label for="rec-notas">Notas</label><input id="rec-notas" maxlength="1000"></div>
+            <div class="table-wrap"><table class="data" id="table-rec-lineas">
+              <thead><tr><th>Ingrediente</th><th>Cantidad</th><th>Costo</th><th></th></tr></thead><tbody></tbody>
+            </table></div>
+            <div class="filter-bar">
+              <button class="btn ghost" id="btn-rec-linea" type="button">+ Ingrediente</button>
+              <button class="btn primary" id="btn-rec-guardar" type="button">Guardar receta</button>
+            </div>
+            <p class="hint" id="rec-msg"></p>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- ===================== CLIENTES ===================== -->
     <section id="tab-clientes" class="tab-panel">
@@ -1180,5 +1359,6 @@
 <script src="libro-ventas.js"></script>
 <script src="app.js"></script>
 <script src="clientes.js"></script>
+<script src="inventario.js"></script>
 </body>
 </html>

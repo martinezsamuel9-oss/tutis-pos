@@ -19,7 +19,38 @@
     // La pregunta "¿Es cliente?" se prende solo en las pruebas que la revisan.
     clientes_config: [{ id: true, vip_monto_90d: 1500, vip_visitas_90d: 8, frecuente_visitas_90d: 3, nuevo_dias: 30,
       inactivo_dias: 45, aviso_cumple_dias: 7, preguntar_en_caja: localStorage.getItem("fake_preguntar") === "1" }], expenses: [], audit_log: [], customers: [], loyalty_transactions: [], sale_lines: [], purchases: [], products: JSON.parse(localStorage.getItem("fake_products") || "[]"),
+    inv_items: [
+      { id: "I1", nombre: "Máquina 1 · izquierda", tipo: "maquina", unidad: "oz", costo: 1.2, maquina: 1, lado: "izq", sabor: "Vainilla", conteo_diario: true, activo: true, orden: 1 },
+      { id: "I2", nombre: "Oreo <b>x</b>", tipo: "topping", unidad: "oz", costo: 2, familia: "normal", conteo_diario: true, activo: true, orden: 2 },
+      { id: "I3", nombre: "Tazas 16 oz", tipo: "unidad", unidad: "unid", costo: 3, conteo_diario: true, activo: true, orden: 3 },
+      { id: "I4", nombre: "Leche", tipo: "materia", unidad: "litro", costo: 30, conteo_diario: false, activo: true, orden: 4 },
+      { id: "I5", nombre: "Froyo servido", tipo: "froyo", unidad: "oz", costo: 1.2, conteo_diario: false, activo: true, orden: 5 },
+    ],
+    recetas: [
+      { id: "R1", nombre: "Base vainilla", tipo: "fabricacion", rinde: 370, produce_item_id: null, vende_nombre: null, notas: "Una bolsa", activo: true },
+      { id: "R2", nombre: "Malteada", tipo: "venta", rinde: null, produce_item_id: null, vende_nombre: "Malteada de <i>fresa</i>", notas: null, activo: true },
+    ],
+    receta_lineas: [{ receta_id: "R1", item_id: "I4", cantidad: 2 }, { receta_id: "R2", item_id: "I5", cantidad: 8 }],
+    fabricaciones: [], inv_movimientos: [{ id: "M1", item_id: "I2", tipo: "merma", cantidad: -1.5, costo: 2, nota: "Se cayó", created_at: "2026-10-30T15:00:00Z" }],
   };
+  // El conteo del día simulado: lo que se guarda queda en localStorage.
+  const invFinal = () => JSON.parse(localStorage.getItem("fake_inv_final") || "{}");
+  function invCuadre() {
+    const fin = invFinal(), cerrado = localStorage.getItem("fake_inv_cerrado") === "1";
+    const linea = (id, nombre, tipo, unidad, ini, ent, venta) => {
+      const f = fin[id] == null ? null : Number(fin[id]), disp = ini + ent;
+      return { item_id: id, nombre, tipo, unidad, costo: 2, sabor: id === "I1" ? "Vainilla" : null, hay_inicial: true, inicial: ini,
+        entradas: ent, fabricado: 0, salidas: 0, merma: 0, venta, ajuste: 0, final: f,
+        consumo: f == null ? null : disp - f, teorico: disp - venta, diferencia: f == null ? null : f - (disp - venta),
+        valor_diferencia: f == null ? null : (f - (disp - venta)) * 3 };
+    };
+    return { fecha: "2026-10-30", desde: "2026-10-30", estado: cerrado ? "cerrado" : (Object.keys(fin).length ? "abierto" : "sin_conteo"),
+      hay_conteo_anterior: true, lineas: [linea("I1", "Máquina 1 · izquierda", "maquina", "oz", 100, 0, 0),
+        linea("I2", "Oreo <b>x</b>", "topping", "oz", 40, 0, 0), linea("I3", "Tazas 16 oz", "unidad", "unid", 50, 0, 20)],
+      froyo: { consumo_maquinas: 60, merma_maquinas: 0, en_otros: 8, barra_libre: 52 }, toppings: { consumo: 10, en_otros: 0, barra_libre: 10 },
+      otros_productos: [{ nombre: "Malteada de <i>fresa</i>", tipo: "froyo", cantidad: 8 }], consumo_barra: 62, vendido_oz: 58, tazas: 20, ventas: 21,
+      oz_por_taza: 2.9, diferencia_oz: -4, diferencia_litros: -0.12, diferencia_pct: -6.9, valor_diferencias_unidades: 0 };
+  }
   const log = JSON.parse(localStorage.getItem("fake_rpcs") || "[]");
   function anotar(name, args) { log.push({ name, args }); localStorage.setItem("fake_rpcs", JSON.stringify(log)); }
 
@@ -150,6 +181,24 @@
         consumo: [{ tipo: "producto", nombre: "Shake <b>Mora</b>", veces: 7, unidades: 7, peso_g: 0, monto: 840 },
                   { tipo: "helado", nombre: "Yogurt natural", veces: 5, unidades: 5, peso_g: 1500, monto: 600 }],
         por_dia: { "6": 7, "2": 1 }, por_hora: { "16": 6, "11": 2 }, pagos: { tarjeta: 9, efectivo: 3 } }, error: null };
+      case "inv_cuadre": return { data: invCuadre(), error: null };
+      case "inv_guardar_conteo": {
+        const f = invFinal();
+        args.p_lineas.forEach((l) => { if (l.final == null) delete f[l.item_id]; else f[l.item_id] = l.final; });
+        localStorage.setItem("fake_inv_final", JSON.stringify(f));
+        return { data: { estado: "abierto" }, error: null };
+      }
+      case "inv_cerrar_conteo": {
+        const falta = ["I1", "I2", "I3"].filter((id) => invFinal()[id] == null);
+        if (falta.length) return { data: null, error: { message: "Falta contar: " + falta.join(", ") } };
+        localStorage.setItem("fake_inv_cerrado", "1");
+        return { data: invCuadre(), error: null };
+      }
+      case "inv_reabrir_conteo": localStorage.removeItem("fake_inv_cerrado"); return { data: null, error: null };
+      case "inv_fabricar": return { data: { id: "FB1", producido: args.p.producido, costo_total: 60, costo_por_unidad: 0.16 }, error: null };
+      case "inv_movimiento": case "inv_borrar_movimiento": case "inv_borrar_fabricacion": return { data: "MX", error: null };
+      case "inv_guardar_item": case "inv_guardar_receta": return { data: "R2", error: null };
+      case "inv_cuadre_rango": { const c = invCuadre(); delete c.lineas; return { data: [c], error: null }; }
       default: return { data: null, error: { message: "no simulado: " + name, code: "X" } };
     }
   }

@@ -488,7 +488,7 @@ function showLogin() {
 const TABS_POR_ROL = {
   cajera: ["venta", "pedidos"],
   operaciones: ["operacion", "compras"],
-  contabilidad: ["dashboard", "contable", "gastos", "compras", "reportes"],
+  contabilidad: ["dashboard", "operacion", "contable", "gastos", "compras", "reportes"],
   gerente: ["dashboard", "venta", "pedidos", "operacion", "inventario", "toppings", "clientes", "gastos", "compras", "contable", "reportes", "config"],
 };
 const ROL_NOMBRE = { cajera: "Cajera", gerente: "Gerencia", propietario: "Propietaria", operaciones: "Operaciones", contabilidad: "Contabilidad" };
@@ -622,6 +622,7 @@ document.querySelectorAll(".tab-btn").forEach((btn) => {
     if (btn.dataset.tab === "reportes") { cargarControlPesos(); prepararLibroVentas(); cargarTurnos(); }
     if (btn.dataset.tab === "venta") cargarCaja();
     if (btn.dataset.tab === "config") pintarEstadoPin();
+    if (btn.dataset.tab === "operacion") abrirOperacion();
   });
 });
 
