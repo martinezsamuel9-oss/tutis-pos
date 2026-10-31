@@ -334,6 +334,14 @@ main { padding: 20px 16px 60px; }
 .caja-cuenta td { padding: 5px 4px; border-bottom: 1px solid var(--border); }
 .caja-cuenta td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 .caja-cuenta tr.total td { font-weight: 700; border-bottom: none; }
+.caja-cuenta td.num { text-align: right; font-variant-numeric: tabular-nums; }
+/* Pasos del cierre (sql/21): 1. tarjeta, 2. efectivo, 3. otras formas de pago */
+.caja-pasos { display: flex; gap: 6px; list-style: none; padding: 0; margin: 6px 0 2px; flex-wrap: wrap; }
+.caja-pasos li { flex: 1 1 0; min-width: 90px; padding: 8px 10px; border-radius: var(--radius-s); border: 1px solid var(--border);
+  font-size: 0.82rem; font-weight: 700; color: var(--ink-soft); text-align: center; }
+.caja-pasos li.actual { border-color: var(--accent); color: var(--ink); background: var(--accent-soft); box-shadow: inset 0 -3px 0 var(--accent); }
+.caja-pasos li.hecho { color: var(--ink); }
+#caja-precierre { font-size: 0.9rem; }
 .scale-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--ink-soft); }
 .scale-reading { font-size: 1.9rem; font-weight: 700; line-height: 1.15; }
 .scale-reading.moving { color: var(--ink-soft); }
@@ -564,6 +572,25 @@ table.data tr.low-stock td { background: var(--danger-bg); }
 #table-clientes tbody tr.sel td { background: var(--accent-soft); }
 .pts-gana  { color: var(--success); font-weight: 700; }
 .pts-canje { color: var(--danger);  font-weight: 700; }
+
+/* Categoría del cliente: siempre con el nombre escrito, el color solo acompaña. */
+.cat-badge {
+  display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: .72rem; font-weight: 700;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--ink-soft); vertical-align: middle;
+}
+.cat-badge[hidden] { display: none; }
+.cat-badge.vip       { background: var(--accent-soft); color: var(--accent-ink); border-color: var(--accent); }
+.cat-badge.frecuente { background: var(--success-bg); color: var(--success); border-color: var(--success); }
+.cat-badge.nuevo     { background: var(--accent-2-soft); color: var(--accent-2); border-color: var(--accent-2); }
+.cat-badge.inactivo  { background: var(--warn-bg); color: var(--warn); border-color: var(--warn); }
+.alert.cumple { background: var(--accent-2-soft); color: var(--accent-2); font-weight: 700; margin: 8px 0 0; }
+.loy-obs { margin: 6px 0 0; font-size: .85rem; color: var(--ink-soft); white-space: pre-line; }
+.cumple-row { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: .9rem; }
+.cumple-row:last-child { border-bottom: 0; }
+#pc-resultado { margin: 8px 0; }
+#cliente-modal details { margin: 6px 0 10px; }
+#cliente-modal summary { cursor: pointer; color: var(--ink-soft); font-size: .88rem; }
+#cli-e-obs { width: 100%; font-family: var(--font); }
 
 /* --- Separador "o" (entrar con huella / autorizar con PIN) ----------------- */
 .or-sep { display: flex; align-items: center; gap: 10px; margin: 14px 0; color: var(--ink-soft); font-size: 0.78rem; }

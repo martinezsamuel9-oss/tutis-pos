@@ -25,7 +25,7 @@
    Cómo publicar una versión nueva: sube CACHE_VERSION. Eso borra la caché
    anterior y obliga a bajar los archivos otra vez.
    =========================================================================== */
-const CACHE_VERSION = "tutis-v24";
+const CACHE_VERSION = "tutis-v25";
 
 const APP_SHELL = [
   "./",
@@ -34,6 +34,7 @@ const APP_SHELL = [
   "./app.js",
   "./bascula.js",
   "./libro-ventas.js",
+  "./clientes.js",
   "./config.js",
   "./vendor/supabase.min.js",
   "./logo.png",

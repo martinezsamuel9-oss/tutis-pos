@@ -15,15 +15,17 @@ function ok(cond, msg, extra) {
   else { fallas++; console.log("[FALLA]", msg, extra === undefined ? "" : JSON.stringify(extra)); }
 }
 
-const browser = await chromium.launch();
+// PW_CHROME: usar otro Chromium ya instalado si el de Playwright no está.
+const browser = await chromium.launch(process.env.PW_CHROME ? { executablePath: process.env.PW_CHROME } : {});
 
 const configReal = fs.readFileSync(path.join(AQUI, "..", "web", "config.js"), "utf8");
 
-async function abrir(rol, { serial = true, huella = false, fuera = false, movil = false } = {}) {
+async function abrir(rol, { serial = true, huella = false, fuera = false, movil = false, ls = {} } = {}) {
   const ctx = await browser.newContext({ serviceWorkers: "block",
     ...(movil ? { isMobile: true, hasTouch: true, viewport: { width: 390, height: 844 },
                   userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1" } : {}) });
   await ctx.addInitScript((r) => { if (!localStorage.getItem("fake_role")) localStorage.setItem("fake_role", r); }, rol);
+  await ctx.addInitScript((o) => { Object.entries(o).forEach(([k, v]) => { if (localStorage.getItem(k) == null) localStorage.setItem(k, v); }); }, ls);
   if (fuera) await ctx.addInitScript(() => { if (!sessionStorage.getItem("ya")) { localStorage.setItem("fake_logged_out", "1"); sessionStorage.setItem("ya", "1"); } });
   // La huella se prende o se apaga en la prueba, sin importar cómo esté config.js.
   await ctx.route("**/config.js", (r) => r.fulfill({ contentType: "application/javascript", body: configReal.replace(/PASSKEYS:\s*(true|false)/, `PASSKEYS: ${huella}`) }));
@@ -471,31 +473,56 @@ const texto = (page, sel) => page.locator(sel).innerText();
   const mv = (await rpcs(page, "caja_movimiento")).pop().args;
   ok(mv.p_tipo === "retiro" && mv.p_monto === 100 && mv.p_motivo === "Pago al del hielo", "41b retiro de 100 con su motivo");
 
+  await page.click("#btn-caja-precierre");
+  await page.waitForSelector("#caja-precierre tbody tr td:nth-child(5)");
+  const pre = await texto(page, "#caja-modal");
+  ok(pre.includes("000123") && pre.includes("2640") && pre.includes("SIN AUTORIZACIÓN") && pre.includes("300.00")
+     && await page.isHidden("#btn-caja-ok"),
+     "41c el pre-cierre lista los vouchers del turno, marca el que no tiene autorización y solo es para mirar", pre);
+  await page.click("#btn-caja-cancelar");
+
   await page.click("#btn-caja-cerrar");
-  await page.waitForSelector("#caja-modal:not([hidden])");
-  ok(!/esperado|debería haber\s*L|1000/i.test(await texto(page, "#caja-modal")), "42 al cerrar, la pantalla NO dice cuánto debería haber");
+  await page.waitForSelector("#caja-precierre tbody tr td:nth-child(5)");
+  ok((await texto(page, "#caja-pasos")).includes("Tarjeta") && await page.isVisible("#caja-lote"), "42 el cierre empieza por la tarjeta: pre-cierre y lote del datáfono");
+  await page.click("#btn-caja-ok");
+  ok((await texto(page, "#caja-msg")).includes("lote"), "42a sin el lote del datáfono no se avanza");
+  await page.fill("#caja-lote", "000389");
+  await page.fill("#caja-lote-ventas", "2");
+  await page.fill("#caja-lote-monto", "300");
+  await page.click("#btn-caja-ok");
+  await page.waitForSelector("#caja-conteo-area:not([hidden])");
+  ok(!/esperado|debería haber\s*L|1000/i.test(await texto(page, "#caja-modal")), "42b en el efectivo, la pantalla NO dice cuánto debería haber");
   await page.fill('#caja-conteo input[data-den="500"]', "1");
   await page.fill('#caja-conteo input[data-den="200"]', "2");
   await page.fill('#caja-conteo input[data-den="50"]', "1");
   await page.click("#btn-caja-ok");
-  ok((await texto(page, "#caja-msg")).includes("queda en la gaveta"), "42b hay que decir cuánto queda de fondo");
+  ok((await texto(page, "#caja-msg")).includes("queda en la gaveta"), "42c hay que decir cuánto queda de fondo");
   await page.click("#btn-caja-queda-todo");
-  ok((await page.inputValue("#caja-deja")) === "950.00", "42c \"Queda todo\" pone lo contado");
+  ok((await page.inputValue("#caja-deja")) === "950.00", "42d \"Queda todo\" pone lo contado");
   await page.fill("#caja-deja", "700");
+  await page.click("#btn-caja-ok");
+  await page.waitForSelector("#caja-otros-area:not([hidden])");
+  ok(await page.isVisible("#caja-dec-pedidosya") && await page.isVisible("#caja-dec-hugo") && !/150/.test(await texto(page, "#caja-modal")),
+     "42e luego transferencias y delivery (Pedidos Ya, Hugo), también a ciegas");
+  await page.fill("#caja-dec-pedidosya", "150");
   page.once("dialog", (d) => d.accept());
   await page.click("#btn-caja-ok");
   await page.waitForSelector("#caja-resultado:not([hidden])");
+  const cerr = (await rpcs(page, "caja_cerrar")).pop().args;
+  ok(cerr.p_lote.lote === "000389" && cerr.p_lote.monto === 300 && cerr.p_declarado.tarjeta === 300 && cerr.p_declarado.pedidosya === 150
+     && cerr.p_declarado.hugo === 0 && cerr.p_deja_fondo === 700, "42f a la base va el lote, lo declarado por forma de pago y el fondo", cerr);
   const res = await texto(page, "#caja-resultado");
-  ok(res.includes("Faltan") && res.includes("50.00") && res.includes("1000.00") && await page.isVisible("#caja-explicar-area"),
-     "42d después de guardar el conteo sí se ve lo esperado y la diferencia, y se pide explicación", res);
+  ok(res.includes("Faltante") && res.includes("50.00") && res.includes("1000.00") && res.includes("Pedidos Ya") && res.includes("coincide")
+     && await page.isVisible("#caja-explicar-area"),
+     "42g después de guardar se ve el cuadre por forma de pago, el faltante y se pide explicación", res);
   await page.fill("#caja-explicacion", "Di mal un vuelto");
   await page.click("#btn-caja-explicar");
   await page.waitForFunction(() => document.querySelector("#caja-msg").textContent.includes("guardada"));
-  ok((await rpcs(page, "caja_explicar")).pop().args.p_texto === "Di mal un vuelto", "42e la explicación llega a la base");
+  ok((await rpcs(page, "caja_explicar")).pop().args.p_texto === "Di mal un vuelto", "42h la explicación llega a la base");
   await page.click("#btn-caja-imprimir");
   const comp = await texto(page, "#receipt-body");
-  ok(comp.includes("ARQUEO DE CAJA") && comp.includes("× 2") && comp.includes("Recibe (gerente)") && !/innova504/i.test(comp),
-     "42f comprobante del arqueo con el conteo y espacio para firmas");
+  ok(comp.includes("ARQUEO DE CAJA") && comp.includes("× 2") && comp.includes("Recibe (gerente)") && comp.includes("Pedidos Ya") && comp.includes("000389")
+     && !/innova504/i.test(comp), "42i comprobante del arqueo con el conteo, el cuadre por forma de pago, el lote y espacio para firmas", comp);
   ok(errores.length === 0, "43 sin errores de JavaScript (caja)", errores);
   await ctx.close();
 }
@@ -507,12 +534,156 @@ const texto = (page, sel) => page.locator(sel).innerText();
   const t = await texto(page, "#table-turnos");
   ok(t.includes("Faltan") && t.includes("20.00") && t.includes("Entrega") && t.includes("Al cerrar") && html.includes("&lt;b&gt;Ana"),
      "44 la gerente ve el turno con faltante, diferencia de entrega, el esperado que cambió, y los nombres escapados", t);
+  ok(t.includes("Pedidos Ya") && t.includes("Falta HNL 10.00") && t.includes("Lote 000389"), "44a y el cuadre de las otras formas de pago con el lote", t);
   ok((await texto(page, "#turnos-fuera")).includes("sin caja abierta"), "44b avisa las ventas en efectivo que no cayeron en ningún turno");
   page.once("dialog", (d) => d.accept("Hablado con Ana"));
   await page.click('#table-turnos button:has-text("Revisar")');
   await page.waitForFunction(() => JSON.parse(localStorage.getItem("fake_rpcs") || "[]").some((x) => x.name === "caja_revisar"));
   ok((await rpcs(page, "caja_revisar")).pop().args.p_nota === "Hablado con Ana", "44c la gerente revisa el cierre con nota");
   ok(errores.filter((e) => !/no simulado/.test(e)).length === 0, "44d sin errores de JavaScript (turnos)", errores);
+  await ctx.close();
+}
+
+/* ---------------- Clientes: "¿Es cliente?" al cobrar ---------------- */
+{
+  const { ctx, page, errores } = await abrir("cajera", { ls: { fake_preguntar: "1", fake_loyalty: "1" } });
+  await page.waitForFunction(() => document.querySelector("#scale-status").textContent !== "Sin conectar");
+  const pesarYCobrar = async () => {
+    await ponerBascula(page, { g: 165, motion: false });
+    await page.waitForFunction(() => document.querySelector("#scale-reading").textContent.includes("165"));
+    await page.click("#btn-weigh-ice");
+    await page.waitForFunction(() => document.querySelector("#out-ice-weight").textContent.includes("150"));
+    await page.click("#btn-charge");
+  };
+  // 1) Sin cliente: pregunta, y "Sin cliente" cobra igual.
+  await pesarYCobrar();
+  await page.waitForSelector("#cliente-modal:not([hidden])");
+  ok(true, "50 al cobrar sin cliente, la caja pregunta \"¿Es cliente?\"");
+  const antes = (await rpcs(page, "process_sale")).length;
+  await page.click("#btn-pc-sin");
+  await page.waitForSelector("#receipt-modal:not([hidden])");
+  const v1 = (await rpcs(page, "process_sale")).pop().args.payload;
+  ok((await rpcs(page, "process_sale")).length === antes + 1 && !v1.customer_id, "50a \"Sin cliente, cobrar\" cobra sin cliente");
+  await page.click("#btn-close-receipt");
+
+  // 2) Teléfono que no existe: inscribe ahí mismo y cobra con ella.
+  await pesarYCobrar();
+  await page.waitForSelector("#cliente-modal:not([hidden])");
+  await page.fill("#pc-tel", "9911-0002");
+  await page.click("#btn-pc-buscar");
+  await page.waitForSelector("#pc-nuevo:not([hidden])");
+  ok(true, "51 un teléfono que no existe abre el formulario para inscribirla");
+  await page.click("#btn-pc-inscribir");
+  ok((await texto(page, "#pc-msg")).includes("nombre"), "51a sin nombre no inscribe");
+  await page.fill("#pc-nombre", "Carla Nueva");
+  await page.fill("#pc-birth", "1995-04-12");
+  await page.selectOption("#pc-sexo", "F");
+  await page.click("#btn-pc-inscribir");
+  await page.waitForSelector("#receipt-modal:not([hidden])");
+  const ins = (await rpcs(page, "clientes_inscribir")).pop().args.p;
+  const v2 = (await rpcs(page, "process_sale")).pop().args.payload;
+  ok(ins.telefono === "9911-0002" && ins.nombre === "Carla Nueva" && ins.cumpleanos === "1995-04-12" && ins.sexo === "F",
+     "51b se inscribe con teléfono, nombre, cumpleaños y sexo", ins);
+  ok(v2.customer_id === "C2", "51c y la venta sale a su nombre (gana puntos)", v2.customer_id);
+  await page.click("#btn-close-receipt");
+
+  // 3) Cliente con puntos: pregunta si canjea; "Sí" vuelve al ticket.
+  await pesarYCobrar();
+  await page.waitForSelector("#cliente-modal:not([hidden])");
+  await page.fill("#pc-tel", "+504 9911 0001");
+  await page.press("#pc-tel", "Enter");
+  await page.waitForSelector("#pc-resultado .loy-result");
+  const r = await page.innerHTML("#pc-resultado");
+  ok(r.includes("&lt;i&gt;R") && r.includes("VIP") && r.includes("Hoy es su cumpleaños"),
+     "52 la encuentra por teléfono en otro formato, con categoría y cumpleaños, nombre escapado");
+  await page.click("#pc-resultado .loy-result");
+  await page.waitForSelector("#btn-pc-canjear");
+  ok((await texto(page, "#pc-resultado")).includes("120 puntos"), "52a tiene puntos: le pregunta si los quiere usar");
+  const antes3 = (await rpcs(page, "process_sale")).length;
+  await page.click("#btn-pc-canjear");
+  await page.waitForTimeout(200);
+  ok(await page.locator("#cliente-modal").isHidden() && (await rpcs(page, "process_sale")).length === antes3,
+     "52b \"Sí, canjear\" vuelve al ticket sin cobrar");
+  ok((await texto(page, "#loy-sel-cumple")).includes("Hoy es su cumpleaños") && (await texto(page, "#loy-sel-obs")).includes("Sin lactosa")
+     && (await texto(page, "#loy-sel-cat")) === "VIP", "52c en el ticket se ve su cumpleaños, su nota y su categoría");
+  await page.click("#btn-charge");
+  await page.waitForSelector("#receipt-modal:not([hidden])");
+  ok(await page.locator("#cliente-modal").isHidden() && (await rpcs(page, "process_sale")).pop().args.payload.customer_id === "C1",
+     "52d con cliente elegido ya no vuelve a preguntar");
+  await page.click("#btn-close-receipt");
+
+  // 4) Sin internet no pregunta (no se puede buscar).
+  await ponerBascula(page, { g: 165, motion: false });
+  await page.waitForFunction(() => document.querySelector("#scale-reading").textContent.includes("165"));
+  await page.click("#btn-weigh-ice");
+  await page.waitForFunction(() => document.querySelector("#out-ice-weight").textContent.includes("150"));
+  await ctx.setOffline(true);
+  await page.click("#btn-charge");
+  await page.waitForSelector("#receipt-modal:not([hidden])");
+  ok(await page.locator("#cliente-modal").isHidden(), "53 sin internet cobra directo, sin preguntar");
+  await ctx.setOffline(false);
+  await page.click("#btn-close-receipt");
+
+  // 5) El formulario de la tarjeta también pide la ficha completa.
+  await page.fill("#loy-q", "99110009");
+  await page.click("#btn-loy-buscar");
+  await page.waitForSelector("#loy-new-form:not([hidden])");
+  ok((await page.inputValue("#loy-new-phone")) === "99110009", "54 si no existe, el formulario arranca con el teléfono buscado");
+  await page.fill("#loy-new-name", "Ana Ficha");
+  await page.fill("#loy-new-ident", "0801-1990-12345");
+  await page.fill("#loy-new-obs", "Alérgica al maní");
+  await page.click("#btn-loy-guardar");
+  await page.waitForSelector("#loy-selected:not([hidden])");
+  const ins2 = (await rpcs(page, "clientes_inscribir")).pop().args.p;
+  ok(ins2.identidad === "0801-1990-12345" && ins2.observaciones === "Alérgica al maní", "54a con identidad y observaciones", ins2);
+  ok(errores.filter((e) => !/no simulado/.test(e)).length === 0, "54b sin errores de JavaScript (clientes en caja)", errores);
+  await ctx.close();
+}
+
+/* ---------------- Clientes: el módulo de la gerente ---------------- */
+{
+  const { ctx, page, errores } = await abrir("gerente");
+  await page.click('.tab-btn[data-tab="clientes"]');
+  await page.waitForSelector("#table-clientes tbody tr:nth-child(3)");
+  const k = (await texto(page, "#cli-kpis")).toLowerCase();
+  ok(k.includes("vip") && k.includes("inactivos") && k.includes("ticket promedio") && k.includes("cumpleaños cerca"),
+     "55 el módulo muestra VIP, inactivos, ticket promedio y cumpleaños cerca", k);
+  ok((await page.innerHTML("#cli-cumples")).includes("&lt;i&gt;R") && (await page.innerHTML("#cli-cumples")).includes("wa.me/50499110001"),
+     "55a el aviso de cumpleaños trae el enlace de WhatsApp, con el nombre escapado");
+  await page.selectOption("#cli-cat", "inactivo");
+  ok((await page.locator("#table-clientes tbody tr").count()) === 1 && (await texto(page, "#table-clientes")).includes("Óscar"),
+     "55b filtrar por categoría");
+  await page.selectOption("#cli-cat", "");
+  await page.fill("#cli-desde", "2026-09-01");
+  await page.dispatchEvent("#cli-desde", "change");
+  ok((await page.locator("#table-clientes tbody tr").count()) === 1 && (await texto(page, "#table-clientes")).includes("Óscar"),
+     "55c \"no vienen desde\" deja a quien vino antes y no después (sin contar a quien nunca vino)");
+  await page.fill("#cli-desde", "");
+  await page.dispatchEvent("#cli-desde", "change");
+  await page.fill("#cli-q", "oscar");
+  ok((await page.locator("#table-clientes tbody tr").count()) === 1, "55d la búsqueda ignora los acentos");
+  await page.fill("#cli-q", "");
+  await page.click('#table-clientes tbody tr:has-text("Valeria")');
+  await page.waitForSelector("#table-cli-consumo tbody tr td.num");
+  const d = (await texto(page, "#cli-detail")).toLowerCase();
+  ok(d.includes("ticket promedio") && d.includes("25.1 días") && d.includes("los sábados") && d.includes("16:00") && d.includes("tarjeta"),
+     "56 la ficha dice cada cuánto viene, su día y hora, y cómo paga", d.slice(0, 400));
+  ok((await page.innerHTML("#table-cli-consumo")).includes("&lt;b&gt;Mora"), "56a lo que consume, escapado");
+  ok((await page.inputValue("#cli-e-ident")) === "0801-1999-00001" && (await page.inputValue("#cli-e-obs")) === "Sin lactosa",
+     "56b la gerente ve y edita identidad y observaciones");
+  await page.fill("#cli-e-phone", "");
+  await page.click("#btn-cli-guardar");
+  ok((await texto(page, "#cli-e-msg")).includes("teléfono"), "56c no deja el teléfono vacío: es la llave");
+  await page.fill("#cli-e-phone", "9911-0099");
+  await page.fill("#cli-e-obs", "Sin lactosa. Prefiere mora.");
+  await page.click("#btn-cli-guardar");
+  await page.waitForFunction(() => JSON.parse(localStorage.getItem("fake_rpcs") || "[]").some((x) => x.name === "update:customers"));
+  const up = (await rpcs(page, "update:customers")).pop().args;
+  ok(up.phone === "9911-0099" && up.observaciones === "Sin lactosa. Prefiere mora." && up.sexo === "F", "56d guarda la ficha", up);
+  const [descarga] = await Promise.all([page.waitForEvent("download"), page.click("#btn-cli-excel")]);
+  ok(/^clientes_.*\.xlsx$/.test(descarga.suggestedFilename()), "57 descarga la lista en Excel", descarga.suggestedFilename());
+  ok(await page.locator("#cli-reglas-card").isHidden(), "57a la gerente no ve las reglas de las categorías");
+  ok(errores.filter((e) => !/no simulado/.test(e)).length === 0, "57b sin errores de JavaScript (módulo de clientes)", errores);
   await ctx.close();
 }
 

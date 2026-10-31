@@ -7,7 +7,7 @@
 
 -- Las dos suites tienen que poder correrse seguidas y repetidas sobre la
 -- misma base, así que primero se limpia lo que dejó la corrida anterior.
-delete from public.customers where phone = '9988-7766';
+delete from public.customers where telefono_clave = '99887766';
 
 insert into auth.users (id, email) values
   ('11111111-1111-1111-1111-111111111111', 'propietario@tutis.test'),
@@ -219,7 +219,7 @@ select 'P11 diferencia entre saldo y suma de movimientos (debe ser 0)' as prueba
 -- de que la caja sincronice, el gerente desactiva a esa clienta. Al llegar
 -- la venta, no puede rechazarse: la cola descarta los rechazos y se perdería
 -- una venta que sí ocurrió.
-update public.customers set active = false where phone = '9988-7766';
+update public.customers set active = false where telefono_clave = '99887766';
 set role authenticated;
 set request.jwt.claim.sub = '33333333-3333-3333-3333-333333333333';
 do $$
@@ -274,4 +274,4 @@ exception when others then
 end $$;
 reset role; reset request.jwt.claim.sub;
 update public.loyalty_config set activo = true;
-update public.customers set active = true where phone = '9988-7766';
+update public.customers set active = true where telefono_clave = '99887766';

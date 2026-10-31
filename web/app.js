@@ -79,7 +79,7 @@ const ICON_FINGER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 const ICON_MOON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79Z"/></svg>';
 const ICON_SUN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>';
 
-const PAGO_LABELS = { efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia", sin_dato: "Sin dato (ventas antiguas)" };
+const PAGO_LABELS = { efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia", pedidosya: "Pedidos Ya", hugo: "Hugo", sin_dato: "Sin dato (ventas antiguas)" };
 
 function rowActionsHtml() {
   return `<div class="row-actions">
@@ -172,6 +172,14 @@ function activeLocation() {
 function isOwner()   { return STATE.profile && STATE.profile.role === "propietario"; }
 function isManager() { return STATE.profile && STATE.profile.role === "gerente"; }
 function canManage() { return isOwner() || isManager(); }
+// Roles de oficina (sql/20): pueden ser de una tienda o de todas.
+function rol() { return (STATE.profile && STATE.profile.role) || ""; }
+function veTodas() {
+  return isOwner() || !!(STATE.profile && STATE.profile.todas_tiendas && ["operaciones", "contabilidad"].includes(rol()));
+}
+function canAccount() { return canManage() || rol() === "contabilidad"; }
+function canOperate() { return canManage() || rol() === "operaciones"; }
+function esCaja() { return ["cajera", "gerente", "propietario"].includes(rol()); }
 
 /* --- Cola de ventas pendientes --------------------------------------------- */
 function loadPending() { STATE.pending = lsGet(LS.pending, []); }
@@ -451,7 +459,7 @@ async function startSession() {
     alert("Tu usuario está desactivado. Habla con el propietario.");
     await sb.auth.signOut(); showLogin(); return;
   }
-  if (profile.role !== "propietario" && !profile.location_id) {
+  if (profile.role !== "propietario" && !profile.location_id && !profile.todas_tiendas) {
     alert("Tu usuario todavía no tiene sucursal asignada. Pídele al propietario que te la asigne.");
     await sb.auth.signOut(); showLogin(); return;
   }
@@ -467,7 +475,7 @@ async function startSession() {
   await recuperarPedidoAbandonado();
   await syncPending();
   updateConnBadge();
-  if (canManage()) await loadDashboard();
+  if (veTab("dashboard")) await loadDashboard();
 }
 
 function showLogin() {
@@ -475,19 +483,28 @@ function showLogin() {
   $("app").hidden = true;
 }
 
-const ROLE_RANK = { cajera: 1, gerente: 2, propietario: 3 };
-function applyRoleVisibility() {
-  const rank = ROLE_RANK[STATE.profile.role] || 0;
-  document.querySelectorAll(".tab-btn").forEach((btn) => {
-    const need = btn.dataset.minRole;
-    btn.hidden = need ? rank < ROLE_RANK[need] : false;
-  });
-  $("user-badge").textContent = `${STATE.profile.full_name || "Usuario"} · ${STATE.profile.role}`;
-  $("owner-location-picker").hidden = !isOwner();
+// Qué pestañas ve cada rol. Es solo la pantalla: lo que protege es la base.
+// Gerencia ve todo menos la administración; la propietaria, todo.
+const TABS_POR_ROL = {
+  cajera: ["venta", "pedidos"],
+  operaciones: ["operacion", "compras"],
+  contabilidad: ["dashboard", "contable", "gastos", "compras", "reportes"],
+  gerente: ["dashboard", "venta", "pedidos", "operacion", "inventario", "toppings", "clientes", "gastos", "compras", "contable", "reportes", "config"],
+};
+const ROL_NOMBRE = { cajera: "Cajera", gerente: "Gerencia", propietario: "Propietaria", operaciones: "Operaciones", contabilidad: "Contabilidad" };
+function veTab(tab) { return isOwner() || (TABS_POR_ROL[rol()] || []).includes(tab); }
 
-  // La cajera abre directo en Venta, que es lo único que le toca. Gerente y
-  // propietario abren en el tablero: es la pantalla de "cómo va el negocio".
-  const inicio = canManage() ? "dashboard" : "venta";
+function applyRoleVisibility() {
+  document.querySelectorAll(".tab-btn").forEach((btn) => { btn.hidden = !veTab(btn.dataset.tab); });
+  const solo = { manage: canManage(), account: canAccount(), operate: canOperate(), owner: isOwner(), caja: esCaja() };
+  document.querySelectorAll("[data-solo]").forEach((el) => { el.hidden = !solo[el.dataset.solo]; });
+  $("user-badge").textContent = `${STATE.profile.full_name || "Usuario"} · ${ROL_NOMBRE[rol()] || rol()}`;
+  $("owner-location-picker").hidden = !veTodas();
+
+  // La cajera abre directo en Venta, que es lo único que le toca. Gerencia,
+  // contabilidad y la propietaria abren en el tablero; operaciones, en su
+  // inventario diario.
+  const inicio = veTab("dashboard") ? "dashboard" : veTab("venta") ? "venta" : "operacion";
   document.querySelectorAll(".tab-btn").forEach((b) => b.classList.toggle("active", b.dataset.tab === inicio));
   document.querySelectorAll(".tab-panel").forEach((pnl) => pnl.classList.toggle("active", pnl.id === "tab-" + inicio));
 }
@@ -523,7 +540,7 @@ async function loadData() {
     STATE.products = pr.data || [];
 
     let salesQuery = sb.from("sales").select("*, locations(name)").order("created_at", { ascending: false }).limit(200);
-    if (!isOwner()) salesQuery = salesQuery.eq("location_id", locId);
+    if (!veTodas()) salesQuery = salesQuery.eq("location_id", locId);
     const { data: sales } = await salesQuery;
     STATE.sales = sales || [];
 
@@ -571,18 +588,19 @@ function renderAll() {
   renderProductos();
   renderQuote();
   iniciarPedidosApp();
-  cargarCaja();
+  if (esCaja()) cargarCaja();
   if (canManage()) {
     renderInventory();
     renderProductsTable();
     renderToppingsTable();
-    renderReports();
-    renderClosing();
     fillConfigForm();
   }
-  if (canManage()) { fillDashLocationPicker(); llenarSelectoresGastos(); }
+  if (canAccount()) { renderReports(); renderClosing(); }
+  if (canAccount()) { fillDashLocationPicker(); llenarSelectoresGastos(); }
   if (GAS.loaded) renderGastos();
-  if (isOwner()) { fillReportLocationPicker(); renderAdmin(); }
+  if (veTodas()) fillReportLocationPicker();
+  if (isOwner()) renderAdmin();
+  if (typeof renderOperacion === "function" && canOperate()) renderOperacion();
   if (DASH.loaded) renderDashboard();
 }
 
@@ -1097,6 +1115,7 @@ async function recuperarPedidoAbandonado() {
 }
 
 $("btn-void-order").addEventListener("click", async () => {
+  LOY.preguntado = false;
   if (!hayPesado()) { limpiarPedido(); return; }
   const motivo = prompt("¿Por qué se anula este pedido ya pesado?\nQueda registrado con tu nombre y la gerente lo verá.");
   if (motivo === null) return;
@@ -1262,7 +1281,7 @@ $("btn-pin-ok").addEventListener("click", async () => {
    tienda, el servidor rechazaría la venta entera al sincronizar, y la cola
    trata ese rechazo como definitivo — se perdería el registro de una venta
    que sí ocurrió. No se puede gastar un saldo que no se puede verificar. */
-const LOY = { cliente: null, cfg: null, maxPuntos: 0, maxDescuento: 0 };
+const LOY = { cliente: null, cfg: null, maxPuntos: 0, maxDescuento: 0, preguntado: false };
 
 async function cargarReglasFidelizacion() {
   if (!sb || !navigator.onLine) return;
@@ -1281,8 +1300,16 @@ function pintarClienteSeleccionado() {
   $("loy-offline-hint").hidden = !sinRed;
   if (!c) { renderQuote(); return; }
   $("loy-sel-name").textContent = c.full_name;
-  $("loy-sel-code").textContent = `Carnet ${c.card_code}`;
+  $("loy-sel-code").textContent = [c.phone, `Carnet ${c.card_code}`].filter(Boolean).join(" · ");
   $("loy-sel-points").textContent = c.points_balance;
+  pintarCategoria($("loy-sel-cat"), c.categoria);
+  // El cumpleaños y las observaciones son para atenderla bien: que la
+  // cajera los vea en el momento en que la tiene enfrente.
+  const cumple = textoCumple(c.dias_para_cumple);
+  $("loy-sel-cumple").hidden = !cumple;
+  $("loy-sel-cumple").textContent = cumple ? `🎂 ${cumple}` : "";
+  $("loy-sel-obs").hidden = !c.observaciones;
+  $("loy-sel-obs").textContent = c.observaciones ? `Nota: ${c.observaciones}` : "";
   $("loy-redeem-row").hidden = sinRed;
   renderQuote();
 }
@@ -1304,16 +1331,21 @@ async function buscarCliente() {
   const { data, error } = await sb.rpc("loyalty_buscar", { p_texto: q });
   if (error) { box.innerHTML = `<p class="hint">${esc(error.message)}</p>`; return; }
   const lista = data || [];
-  if (!lista.length) { box.innerHTML = '<p class="hint">No hay nadie con ese dato. Puedes inscribirlo abajo.</p>'; return; }
-  // Un código de carnet exacto identifica a una sola persona: se selecciona
-  // de una vez. Es lo que hace instantáneo pasar el QR por el lector.
-  const exacto = lista.find((c) => c.card_code.toUpperCase() === q.toUpperCase());
-  if (exacto) { seleccionarCliente(exacto); return; }
+  if (!lista.length) {
+    box.innerHTML = '<p class="hint">No hay nadie con ese dato. Puedes inscribirlo abajo.</p>';
+    // Si lo que se buscó parece un teléfono, el formulario arranca con él.
+    if (/^[\d\s+()-]{8,}$/.test(q)) { $("loy-new-phone").value = q; $("loy-new-form").hidden = false; $("loy-new-name").focus(); }
+    return;
+  }
+  // Un carnet o un teléfono exacto identifica a una sola persona: se
+  // selecciona de una vez. Es lo que hace instantáneo pasar el QR por el lector.
+  const exactos = lista.filter((c) => c.exacto || c.card_code.toUpperCase() === q.toUpperCase());
+  if (exactos.length === 1) { seleccionarCliente(exactos[0]); return; }
   box.innerHTML = "";
   lista.forEach((c) => {
     const b = document.createElement("button");
     b.type = "button"; b.className = "loy-result";
-    b.innerHTML = `<span><strong>${esc(c.full_name)}</strong><br><span class="hint">${esc(c.phone || "")} · ${esc(c.card_code)}</span></span>
+    b.innerHTML = `<span><strong>${esc(c.full_name)}</strong> ${badgeCategoria(c.categoria)}<br><span class="hint">${esc(c.phone || "")} · ${esc(c.card_code)}</span></span>
                    <span class="num"><strong>${esc(c.points_balance)}</strong> pts</span>`;
     b.addEventListener("click", () => seleccionarCliente(c));
     box.appendChild(b);
@@ -1345,18 +1377,19 @@ $("btn-loy-nuevo").addEventListener("click", () => {
 
 $("btn-loy-guardar").addEventListener("click", async () => {
   const msg = $("loy-new-msg");
-  const nombre = $("loy-new-name").value.trim();
-  const tel = $("loy-new-phone").value.trim();
-  if (nombre.length < 2) { msg.textContent = "Escribe el nombre completo."; return; }
-  if (!navigator.onLine) { msg.textContent = "Sin conexión no se puede inscribir. Cobra normal y lo inscribes después."; return; }
+  const ficha = {
+    telefono: $("loy-new-phone").value.trim(), nombre: $("loy-new-name").value.trim(),
+    cumpleanos: $("loy-new-birth").value || null, sexo: $("loy-new-sexo").value || null,
+    identidad: $("loy-new-ident").value.trim() || null, observaciones: $("loy-new-obs").value.trim() || null,
+  };
   const btn = $("btn-loy-guardar"); btn.disabled = true;
-  const { data, error } = await sb.rpc("loyalty_registrar", { p_full_name: nombre, p_phone: tel || null });
+  const r = await inscribirCliente(ficha);
   btn.disabled = false;
-  if (error) { msg.textContent = error.message; return; }
+  if (r.error) { msg.textContent = r.error; return; }
   msg.textContent = "";
-  $("loy-new-name").value = ""; $("loy-new-phone").value = "";
+  ["loy-new-phone", "loy-new-name", "loy-new-birth", "loy-new-sexo", "loy-new-ident", "loy-new-obs"].forEach((id) => { $(id).value = ""; });
   $("loy-new-form").hidden = true;
-  seleccionarCliente(data);
+  seleccionarCliente(r.cliente);
 });
 
 // El tope de canje lo decide el servidor. Aquí solo se le pregunta para
@@ -1509,6 +1542,8 @@ async function chargeSale(force) {
       : manual ? "La venta está en cero: teclea el peso del helado o de los toppings." : "La venta está en cero: pesa el helado.");
     return;
   }
+  // "¿Es cliente?": con internet y sin cliente, se pregunta una vez por venta.
+  if (!(await preguntarCliente())) return;
 
   const warnings = [];
   if (plan.hayTaza) {
@@ -1615,6 +1650,7 @@ async function chargeSale(force) {
   showReceipt(payload, result, folio, offline, servidor);
   discountLocalStock(plan, result);
   if (LOY.cliente) quitarCliente();
+  LOY.preguntado = false;
 
   $("inp-customer-name").value = "";
   $("inp-customer-taxid").value = "";
@@ -1711,7 +1747,7 @@ const DENOMINACIONES = {
   GTQ: { billetes: [200, 100, 50, 20, 10, 5, 1], monedas: [0.5, 0.25, 0.1, 0.05] },
   USD: { billetes: [100, 50, 20, 10, 5, 1], monedas: [0.25, 0.1, 0.05, 0.01] },
 };
-const CAJA = { estado: null, modo: null, cierre: null, timer: null };
+const CAJA = { estado: null, modo: null, cierre: null, timer: null, paso: 0, precierre: null };
 const CAJA_KEY = "tutis_caja_estado";
 
 function denominaciones() {
@@ -1759,6 +1795,7 @@ function pintarCaja() {
   $("btn-caja-abrir").hidden = !(e && !e.abierta);
   $("btn-caja-mov").hidden = !(e && e.abierta);
   $("btn-caja-cerrar").hidden = !(e && e.abierta);
+  $("btn-caja-precierre").hidden = !(e && e.abierta);
   $("btn-caja-cerrar").textContent = e && e.abierta && !e.turno.es_mio ? "Recibir o cerrar caja" : "Cerrar o entregar caja";
 }
 
@@ -1802,38 +1839,114 @@ $("caja-conteo").addEventListener("input", () => {
   $("caja-contado").textContent = c.error ? "—" : money(c.total);
 });
 
+// El cierre va por pasos, como en ICG: 1. tarjeta (pre-cierre y lote del
+// datáfono), 2. efectivo, 3. otras formas de pago. Todo a ciegas: el sistema
+// dice cuánto debería haber solo cuando ya quedó guardado lo declarado.
+const PASOS_CIERRE = [
+  ["tarjeta", "Tarjeta (BAC)", "En el datáfono haz el pre-cierre y compara la tira con esta lista, voucher por voucher."],
+  ["efectivo", "Efectivo", "Cuenta todo el dinero de la gaveta, billete por billete (con el fondo). El sistema no te dice cuánto debería haber: lo calcula al guardar."],
+  ["otros", "Transferencias y delivery", "Escribe el total de cada forma de pago según sus comprobantes. Si no hubo, deja 0."],
+];
+
 function abrirModalCaja(modo) {
   if (!navigator.onLine) { alert("Sin conexión: la caja se abre, se cierra y registra retiros con internet. Se puede seguir vendiendo."); return; }
-  CAJA.modo = modo; CAJA.cierre = null;
+  CAJA.modo = modo; CAJA.cierre = null; CAJA.paso = 0; CAJA.precierre = null;
   const t = CAJA.estado && CAJA.estado.turno;
   const titulos = {
     abrir: ["Abrir la caja", "Cuenta el dinero que hay en la gaveta, billete por billete. Ese es el fondo del turno."],
-    cerrar: [t && !t.es_mio ? "Recibir o cerrar la caja" : "Cerrar o entregar la caja",
-             "Cuenta todo el dinero de la gaveta, billete por billete. El sistema no te dice cuánto debería haber: lo calcula al guardar."],
+    cerrar: [t && !t.es_mio ? "Recibir o cerrar la caja" : "Cerrar o entregar la caja", ""],
     mov: ["Retiro o entrada de efectivo", "Cada vez que se saca o se mete dinero en la gaveta, se anota con el motivo."],
+    precierre: ["Pre-cierre de tarjeta", "Las ventas con tarjeta del turno, para compararlas con la tira del datáfono."],
   };
   $("caja-titulo").textContent = titulos[modo][0];
   $("caja-sub").textContent = titulos[modo][1];
-  $("caja-conteo-area").hidden = modo === "mov";
-  $("caja-fondo-area").hidden = modo !== "cerrar";
+  $("caja-pasos").hidden = modo !== "cerrar";
+  $("caja-tarjeta-area").hidden = modo !== "precierre";
+  $("caja-lote-area").hidden = modo !== "cerrar";
+  $("caja-conteo-area").hidden = modo !== "abrir";
+  $("caja-fondo-area").hidden = true;
+  $("caja-otros-area").hidden = true;
   $("caja-mov-area").hidden = modo !== "mov";
   $("caja-resultado").hidden = true; $("caja-resultado").innerHTML = "";
   $("caja-explicar-area").hidden = true;
   $("btn-caja-imprimir").hidden = true;
-  $("btn-caja-ok").hidden = false; $("btn-caja-ok").disabled = false;
-  $("btn-caja-ok").textContent = modo === "abrir" ? "Abrir caja" : modo === "cerrar" ? "Guardar conteo y cerrar" : "Guardar";
-  $("btn-caja-cancelar").textContent = "Cancelar";
+  $("btn-caja-atras").hidden = true;
+  $("btn-caja-ok").hidden = modo === "precierre"; $("btn-caja-ok").disabled = false;
+  $("btn-caja-ok").textContent = modo === "abrir" ? "Abrir caja" : "Guardar";
+  $("btn-caja-cancelar").textContent = modo === "precierre" ? "Listo" : "Cancelar";
   $("caja-msg").textContent = "";
   $("caja-deja").value = "";
+  ["caja-lote", "caja-lote-ventas", "caja-lote-monto", "caja-dec-transferencia", "caja-dec-pedidosya", "caja-dec-hugo"].forEach((id) => { $(id).value = ""; });
   $("caja-mov-monto").value = ""; $("caja-mov-otro").value = ""; $("caja-mov-otro").hidden = true;
   $("caja-mov-motivo").selectedIndex = 0;
-  if (modo !== "mov") pintarConteo();
+  if (modo === "abrir" || modo === "cerrar") pintarConteo();
   $("caja-modal").hidden = false;
+  if (modo === "precierre") cargarPrecierre();
+  if (modo === "cerrar") cargarPrecierre().then(() => irPasoCierre(0));
+}
+
+async function cargarPrecierre() {
+  const body = document.querySelector("#caja-precierre tbody"), pie = document.querySelector("#caja-precierre tfoot");
+  body.innerHTML = '<tr><td colspan="5" class="hint">Cargando…</td></tr>'; pie.innerHTML = "";
+  const { data, error } = await sb.rpc("caja_precierre", { p_location: STATE.activeLocationId });
+  if (error) { body.innerHTML = `<tr><td colspan="5" class="hint">${esc(errorCaja(error))}</td></tr>`; return; }
+  CAJA.precierre = data;
+  const hora = (x) => new Date(x).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  body.innerHTML = data.vouchers.length ? data.vouchers.map((v) => `<tr${!v.autorizacion || v.repetida ? ' class="row-bad"' : ""}>
+      <td>${esc(hora(v.hora))}</td><td>${esc(v.folio == null ? "" : v.folio)}</td>
+      <td>${v.ultimos4 ? `•••• ${esc(v.ultimos4)}` : ""}</td>
+      <td>${v.autorizacion ? esc(v.autorizacion) : "<strong>SIN AUTORIZACIÓN</strong>"}${v.repetida ? " <strong>REPETIDA</strong>" : ""}</td>
+      <td class="num">${esc(money(v.monto))}</td></tr>`).join("")
+    : '<tr><td colspan="5" class="hint">No hubo ventas con tarjeta en este turno.</td></tr>';
+  pie.innerHTML = `<tr class="total"><td colspan="4">${Number(data.ventas)} venta(s)</td><td class="num">${esc(money(data.monto))}</td></tr>`;
+  const malas = Number(data.sin_autorizacion) + data.vouchers.filter((v) => v.repetida).length;
+  $("caja-precierre-aviso").innerHTML = malas
+    ? `<div class="alert bad">Hay vouchers sin autorización o repetidos (en rojo). Búscalos en la tira del datáfono antes de cerrar el lote.</div>` : "";
+}
+
+function irPasoCierre(i) {
+  // Sin ventas con tarjeta, el paso de tarjeta se salta (no hay lote que cerrar).
+  if (i === 0 && CAJA.precierre && Number(CAJA.precierre.ventas) === 0) i = 1;
+  CAJA.paso = i;
+  const [clave, nombre, ayuda] = PASOS_CIERRE[i];
+  $("caja-pasos").innerHTML = PASOS_CIERRE.map(([k, n], j) =>
+    `<li class="${j === i ? "actual" : j < i ? "hecho" : ""}">${j + 1}. ${esc(n)}</li>`).join("");
+  $("caja-sub").textContent = ayuda;
+  $("caja-tarjeta-area").hidden = clave !== "tarjeta";
+  $("caja-conteo-area").hidden = clave !== "efectivo";
+  $("caja-fondo-area").hidden = clave !== "efectivo";
+  $("caja-otros-area").hidden = clave !== "otros";
+  const primero = !(CAJA.precierre && Number(CAJA.precierre.ventas) === 0) ? 0 : 1;
+  $("btn-caja-atras").hidden = i <= primero;
+  $("btn-caja-ok").textContent = i === PASOS_CIERRE.length - 1 ? "Guardar y cerrar" : "Siguiente";
+  $("caja-msg").textContent = "";
+}
+$("btn-caja-atras").addEventListener("click", () => irPasoCierre(Math.max(0, CAJA.paso - 1)));
+
+// Lo que escribió la cajera en el paso de tarjeta: {lote, error}.
+function leerLote() {
+  if (!CAJA.precierre || Number(CAJA.precierre.ventas) === 0) return { lote: null };
+  const lote = $("caja-lote").value.trim().toUpperCase();
+  const ventas = $("caja-lote-ventas").value.trim(), monto = $("caja-lote-monto").value.trim();
+  if (!/^[0-9A-Z]{1,12}$/.test(lote)) return { error: "Escribe el número de lote o de autorización del cierre del datáfono." };
+  if (!/^\d{1,4}$/.test(ventas)) return { error: "Escribe cuántas ventas trae el cierre del datáfono." };
+  if (!(parseFloat(monto) >= 0)) return { error: "Escribe el monto de ventas del cierre del datáfono." };
+  return { lote: { lote, ventas: parseInt(ventas, 10), monto: r2(parseFloat(monto)) } };
+}
+function leerDeclarado(lote) {
+  const d = { tarjeta: lote ? lote.monto : 0 };
+  for (const k of ["transferencia", "pedidosya", "hugo"]) {
+    const v = $(`caja-dec-${k}`).value.trim();
+    if (v !== "" && !(parseFloat(v) >= 0)) return { error: `Revisa el monto de ${PAGO_LABELS[k]}.` };
+    d[k] = v === "" ? 0 : r2(parseFloat(v));
+  }
+  return { declarado: d };
 }
 
 $("btn-caja-abrir").addEventListener("click", () => abrirModalCaja("abrir"));
 $("btn-caja-mov").addEventListener("click", () => abrirModalCaja("mov"));
 $("btn-caja-cerrar").addEventListener("click", () => abrirModalCaja("cerrar"));
+$("btn-caja-precierre").addEventListener("click", () => abrirModalCaja("precierre"));
 $("btn-caja-cancelar").addEventListener("click", () => { $("caja-modal").hidden = true; });
 $("btn-caja-queda-todo").addEventListener("click", () => {
   const c = leerConteo();
@@ -1890,45 +2003,80 @@ $("btn-caja-ok").addEventListener("click", async () => {
     return;
   }
 
-  // Cerrar: primero que suban las ventas sin conexión; si no, lo esperado
-  // saldría corto y parecería un faltante que no es.
+  // Cerrar, paso por paso. Primero que suban las ventas sin conexión; si no,
+  // lo esperado saldría corto y parecería un faltante que no es.
+  const clave = PASOS_CIERRE[CAJA.paso][0];
+  if (clave === "tarjeta") {
+    const l = leerLote();
+    if (l.error) { msg.textContent = l.error; return; }
+    irPasoCierre(1); return;
+  }
+  if (clave === "efectivo") {
+    const deja = $("caja-deja").value.trim();
+    if (deja === "" || !(parseFloat(deja) >= 0)) { msg.textContent = "Escribe cuánto dinero queda en la gaveta (puede ser 0)."; $("caja-deja").focus(); return; }
+    if (parseFloat(deja) > c.total) { msg.textContent = "No puede quedar en la gaveta más de lo que contaste."; return; }
+    irPasoCierre(2); return;
+  }
+  const l = leerLote(), d = leerDeclarado(l.lote);
+  if (l.error) { irPasoCierre(0); $("caja-msg").textContent = l.error; return; }
+  if (d.error) { msg.textContent = d.error; return; }
   if (STATE.pending.length) await syncPending();
   if (STATE.pending.length) {
     msg.textContent = `Hay ${STATE.pending.length} venta(s) sin subir. Espera a que suban (revisa la conexión) y vuelve a intentarlo.`;
     return;
   }
-  const deja = $("caja-deja").value.trim();
-  if (deja === "" || !(parseFloat(deja) >= 0)) { msg.textContent = "Escribe cuánto dinero queda en la gaveta (puede ser 0)."; $("caja-deja").focus(); return; }
-  if (parseFloat(deja) > c.total) { msg.textContent = "No puede quedar en la gaveta más de lo que contaste."; return; }
-  if (!confirm(`Contaste ${money(c.total)} y quedan ${money(parseFloat(deja))} en la gaveta.\n\nUna vez guardado, el conteo no se puede cambiar. ¿Guardar?`)) return;
+  const deja = parseFloat($("caja-deja").value);
+  if (!confirm(`Efectivo contado: ${money(c.total)} (quedan ${money(deja)} de fondo).\n` +
+               (l.lote ? `Tarjeta: ${money(l.lote.monto)} en el lote ${l.lote.lote}.\n` : "") +
+               `Transferencias ${money(d.declarado.transferencia)} · Pedidos Ya ${money(d.declarado.pedidosya)} · Hugo ${money(d.declarado.hugo)}\n\n` +
+               "Una vez guardado no se puede cambiar. ¿Guardar y cerrar?")) return;
   ok.disabled = true;
-  const { data, error } = await sb.rpc("caja_cerrar", { p_location: loc, p_conteo: c.detalle, p_deja_fondo: parseFloat(deja) });
+  const { data, error } = await sb.rpc("caja_cerrar", { p_location: loc, p_conteo: c.detalle, p_deja_fondo: deja,
+                                                        p_declarado: d.declarado, p_lote: l.lote });
   ok.disabled = false;
   if (error) { msg.textContent = errorCaja(error); return; }
   CAJA.cierre = { ...data, conteo: c.detalle };
   await cargarCaja();
-  mostrarResultadoCaja(resumenCierreHtml(data), Number(data.diferencia) !== 0);
+  $("caja-pasos").hidden = true; $("btn-caja-atras").hidden = true;
+  mostrarResultadoCaja(resumenCierreHtml(data), Number(data.diferencia_total) !== 0 || Number(data.diferencia) !== 0);
 });
 
+const ETIQUETA_FORMA = { efectivo: "Efectivo", tarjeta: "Tarjeta (BAC)", transferencia: "Transferencias", pedidosya: "Pedidos Ya", hugo: "Hugo" };
+const difTexto = (v) => Number(v) === 0 ? "Cuadra" : `${Number(v) < 0 ? "Falta" : "Sobra"} ${money(Math.abs(Number(v)))}`;
+
 function resumenCierreHtml(d) {
-  const dif = Number(d.diferencia);
-  const veredicto = dif === 0 ? `<div class="alert ok">La caja cuadra.</div>`
-    : `<div class="alert bad">${dif < 0 ? "Faltan" : "Sobran"} <strong>${esc(money(Math.abs(dif)))}</strong>.</div>`;
+  const dif = Number(d.diferencia_total);
+  const veredicto = dif === 0 ? `<div class="alert ok">La caja cuadra en todas las formas de pago.</div>`
+    : `<div class="alert bad">${dif < 0 ? "Faltante" : "Sobrante"} total: <strong>${esc(money(Math.abs(dif)))}</strong>.</div>`;
+  const formas = (d.formas || []).map((f) => `<tr${Number(f.diferencia) !== 0 ? ' class="row-bad"' : ""}>
+      <td>${esc(ETIQUETA_FORMA[f.metodo] || f.metodo)}${Number(f.n) ? ` <span class="hint">(${Number(f.n)})</span>` : ""}</td>
+      <td class="num">${esc(money(f.sistema))}</td><td class="num">${esc(money(f.declarado))}</td>
+      <td class="num"><strong>${esc(difTexto(f.diferencia))}</strong></td></tr>`).join("");
+  const lote = d.lote ? `<p class="hint">Lote del datáfono ${esc(d.lote.lote)}: ${Number(d.lote.ventas)} venta(s) por ${esc(money(d.lote.monto))}` +
+    (Number(d.lote_diferencia) !== 0 || Number(d.lote_ventas_diferencia) !== 0
+      ? ` — <strong>no coincide con la caja</strong> (${esc(difTexto(d.lote_diferencia))}, ${Number(d.lote_ventas_diferencia) > 0 ? "+" : ""}${Number(d.lote_ventas_diferencia)} venta(s)).`
+      : " — coincide con la caja.") + "</p>" : "";
   return veredicto + `<table class="caja-cuenta">
+    <tr class="total"><td>Forma de pago</td><td>Sistema</td><td>Declarado</td><td>Diferencia</td></tr>
+    ${formas}
+    <tr class="total"><td>Total</td><td class="num">${esc(money(d.total_sistema))}</td><td class="num">${esc(money(d.total_declarado))}</td>
+      <td class="num">${esc(difTexto(d.diferencia_total))}</td></tr>
+  </table>
+  ${lote}
+  <table class="caja-cuenta">
     <tr><td>Fondo al abrir</td><td>${esc(money(d.fondo))}</td></tr>
     <tr><td>Ventas en efectivo (${Number(d.n_efectivo)})</td><td>+ ${esc(money(d.ventas_efectivo))}</td></tr>
     <tr><td>Entradas</td><td>+ ${esc(money(d.entradas))}</td></tr>
     <tr><td>Retiros</td><td>− ${esc(money(d.retiros))}</td></tr>
-    <tr class="total"><td>Debería haber</td><td>${esc(money(d.esperado))}</td></tr>
-    <tr class="total"><td>Contado</td><td>${esc(money(d.contado))}</td></tr>
-    <tr><td>Queda en la gaveta</td><td>${esc(money(d.deja_fondo))}</td></tr>
-  </table>
-  <p class="hint">Aparte, para cuadrar con el datáfono y el banco: tarjeta ${Number(d.n_tarjeta)} venta(s) por ${esc(money(d.tarjeta))};
-    transferencia ${Number(d.n_transferencia)} por ${esc(money(d.transferencia))}.</p>`;
+    <tr class="total"><td>Efectivo que debería haber</td><td>${esc(money(d.esperado))}</td></tr>
+    <tr class="total"><td>Efectivo contado</td><td>${esc(money(d.contado))}</td></tr>
+    <tr><td>Retirado (al depósito)</td><td>${esc(money(Number(d.contado) - Number(d.deja_fondo)))}</td></tr>
+    <tr><td>Nuevo fondo (queda en la gaveta)</td><td>${esc(money(d.deja_fondo))}</td></tr>
+  </table>`;
 }
 
 function mostrarResultadoCaja(html, pedirExplicacion) {
-  $("caja-conteo-area").hidden = true; $("caja-fondo-area").hidden = true; $("caja-mov-area").hidden = true;
+  ["caja-conteo-area", "caja-fondo-area", "caja-mov-area", "caja-tarjeta-area", "caja-otros-area", "caja-pasos"].forEach((id) => { $(id).hidden = true; });
   $("caja-sub").textContent = "";
   $("caja-resultado").innerHTML = html; $("caja-resultado").hidden = false;
   $("caja-explicar-area").hidden = !pedirExplicacion; $("caja-explicacion").value = "";
@@ -1970,11 +2118,13 @@ Retiros:              ${esc(money(d.retiros))}
 Debería haber:        ${esc(money(d.esperado))}
 Contado:              ${esc(money(d.contado))}
 DIFERENCIA:           ${esc(money(d.diferencia))}
-Queda en la gaveta:   ${esc(money(d.deja_fondo))}
+Nuevo fondo:          ${esc(money(d.deja_fondo))}
+Retirado:             ${esc(money(Number(d.contado) - Number(d.deja_fondo)))}
 ${d.explicacion ? `Explicación: ${esc(d.explicacion)}\n` : ""}------------------------------
-Tarjeta: ${Number(d.n_tarjeta)} por ${esc(money(d.tarjeta))}
-Transferencia: ${Number(d.n_transferencia)} por ${esc(money(d.transferencia))}
-
+CUADRE POR FORMA DE PAGO (sistema / declarado)
+${(d.formas || []).map((f) => `${esc((ETIQUETA_FORMA[f.metodo] || f.metodo).padEnd(15))} ${esc(money(f.sistema))} / ${esc(money(f.declarado))}  ${esc(difTexto(f.diferencia))}`).join("\n")}
+TOTAL: ${esc(money(d.total_sistema))} / ${esc(money(d.total_declarado))}  ${esc(difTexto(d.diferencia_total))}
+${d.lote ? `Lote datáfono ${esc(d.lote.lote)}: ${Number(d.lote.ventas)} venta(s), ${esc(money(d.lote.monto))}\n` : ""}
 
 ______________________   ______________________
    Entrega (cajera)          Recibe (gerente)
@@ -1987,19 +2137,33 @@ ______________________   ______________________
    Una llamada por tienda, como el tablero: el permiso se revisa en la base
    tienda por tienda. El esperado se vuelve a calcular: si llegó una venta sin
    conexión después del cierre, se ve contra el que había al cerrar. */
+// Tarjeta, transferencias y delivery de un turno: sistema contra declarado, y el lote.
+function otrasFormasTurno(t) {
+  const pp = t.por_pago || {};
+  if (!t.cerrado_at) {
+    return Object.entries(pp).filter(([m]) => m !== "efectivo")
+      .map(([m, x]) => `${esc(ETIQUETA_FORMA[m] || PAGO_LABELS[m] || m)}: ${esc(money(x.total))}`).join("<br>");
+  }
+  const lineas = (t.formas || []).filter((f) => f.metodo !== "efectivo" && (Number(f.sistema) || Number(f.declarado)))
+    .map((f) => `${esc(ETIQUETA_FORMA[f.metodo] || f.metodo)}: ${esc(money(f.sistema))}` +
+      (Number(f.diferencia) !== 0 ? ` <strong>(${esc(difTexto(f.diferencia))})</strong>` : ""));
+  if (t.lote_tarjeta) lineas.push(`<span class="hint">Lote ${esc(t.lote_tarjeta.lote)}: ${Number(t.lote_tarjeta.ventas)} por ${esc(money(t.lote_tarjeta.monto))}</span>`);
+  return lineas.join("<br>");
+}
+
 async function cargarTurnos() {
-  if (!canManage() || !sb) return;
+  if (!canAccount() || !sb) return;
   const hoy = new Date();
   if (!$("turnos-hasta").value) $("turnos-hasta").value = localDateStr(hoy);
   if (!$("turnos-desde").value) $("turnos-desde").value = localDateStr(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate() - 7));
   const body = document.querySelector("#table-turnos tbody");
-  if (!navigator.onLine) { body.innerHTML = '<tr><td colspan="8" class="hint">Sin conexión: los turnos se consultan con internet.</td></tr>'; return; }
+  if (!navigator.onLine) { body.innerHTML = '<tr><td colspan="9" class="hint">Sin conexión: los turnos se consultan con internet.</td></tr>'; return; }
   const scope = reportScopeId();
   const tiendas = scope ? STATE.locations.filter((l) => l.id === scope) : STATE.locations.filter((l) => l.active);
   const turnos = [], fuera = [];
   for (const l of tiendas) {
     const { data, error } = await sb.rpc("caja_turnos", { p_location: l.id, p_desde: $("turnos-desde").value, p_hasta: $("turnos-hasta").value });
-    if (error) { body.innerHTML = `<tr><td colspan="8" class="hint">${esc(errorCaja(error))}</td></tr>`; return; }
+    if (error) { body.innerHTML = `<tr><td colspan="9" class="hint">${esc(errorCaja(error))}</td></tr>`; return; }
     data.turnos.forEach((t) => turnos.push({ ...t, tienda: l.name }));
     if (Number(data.fuera_de_turno.ventas)) fuera.push({ tienda: l.name, ...data.fuera_de_turno });
   }
@@ -2009,13 +2173,14 @@ async function cargarTurnos() {
   const dif = (v) => v == null ? "" : Number(v) === 0 ? "Cuadra" : `${Number(v) < 0 ? "Faltan" : "Sobran"} ${money(Math.abs(Number(v)))}`;
 
   $("turnos-fuera").innerHTML = fuera.map((f) =>
-    `<div class="alert bad">${varias ? `${esc(f.tienda)}: ` : ""}${Number(f.ventas)} venta(s) en efectivo por ${esc(money(f.total))} sin caja abierta
+    `<div class="alert bad">${varias ? `${esc(f.tienda)}: ` : ""}${Number(f.ventas)} venta(s) por ${esc(money(f.total))} sin caja abierta
      (folios ${esc(f.folios.join(", "))}). Ese dinero no entró en ningún arqueo.</div>`).join("");
 
-  body.innerHTML = turnos.length ? "" : '<tr><td colspan="8" class="hint">No hay turnos en este periodo.</td></tr>';
+  body.innerHTML = turnos.length ? "" : '<tr><td colspan="9" class="hint">No hay turnos en este periodo.</td></tr>';
   turnos.forEach((t) => {
     const tr = document.createElement("tr");
-    const malo = (t.diferencia != null && Number(t.diferencia) !== 0) || (t.diferencia_entrega != null && Number(t.diferencia_entrega) !== 0);
+    const malo = (t.diferencia != null && Number(t.diferencia) !== 0) || (t.diferencia_entrega != null && Number(t.diferencia_entrega) !== 0)
+      || (t.diferencia_total != null && Number(t.diferencia_total) !== 0);
     if (malo) tr.classList.add("row-bad");
     const cambio = t.cerrado_at && Number(t.esperado) !== Number(t.esperado_al_cerrar);
     const movs = (t.movimientos || []).map((m) => `${m.tipo === "retiro" ? "−" : "+"}${money(m.monto)} ${m.motivo} (${m.por})`).join("\n");
@@ -2029,11 +2194,12 @@ async function cargarTurnos() {
       <td class="num">${esc(money(t.esperado))}${cambio ? `<br><span class="hint">Al cerrar: ${esc(money(t.esperado_al_cerrar))} (llegaron o se borraron ventas después)</span>` : ""}</td>
       <td class="num">${t.contado == null ? "" : esc(money(t.contado))}</td>
       <td>${t.cerrado_at ? `<strong>${esc(dif(t.diferencia))}</strong>` : ""}${t.explicacion ? `<br><span class="hint">“${esc(t.explicacion)}”</span>` : ""}</td>
+      <td>${otrasFormasTurno(t)}</td>
       <td></td>`;
     const celda = tr.lastElementChild;
     if (t.revisado_at) {
       celda.innerHTML = `Revisó ${esc(t.revisado_por || "")}<br><span class="hint">${esc(hora(t.revisado_at))}${t.nota_revision ? ` · ${esc(t.nota_revision)}` : ""}</span>`;
-    } else if (t.cerrado_at) {
+    } else if (t.cerrado_at && canManage()) {
       const b = document.createElement("button");
       b.type = "button"; b.className = "btn ghost small"; b.textContent = "Revisar";
       b.addEventListener("click", async () => {
@@ -2265,7 +2431,7 @@ function fillReportLocationPicker() {
 $("sel-report-location").addEventListener("change", () => { renderReports(); renderClosing(); cargarControlPesos(); cargarTurnos(); });
 
 function reportScopeId() {
-  if (!isOwner()) return STATE.activeLocationId;
+  if (!veTodas()) return STATE.activeLocationId;
   const v = $("sel-report-location").value;
   return v === "__all__" ? null : v;
 }
@@ -2412,7 +2578,7 @@ async function renderClosing() {
     descuentos += Number(c.descuentos || 0);
     anulaciones += Number(c.anulaciones || 0); anuladoG += Number(c.anulado_g || 0);
   });
-  const orden = { efectivo: 1, tarjeta: 2, transferencia: 3 };
+  const orden = { efectivo: 1, tarjeta: 2, transferencia: 3, pedidosya: 4, hugo: 5 };
   const payBody = document.querySelector("#table-closing-pay tbody");
   const metodos = Object.entries(pagos).sort((a, b) => (orden[a[0]] || 9) - (orden[b[0]] || 9));
   payBody.innerHTML = metodos.length ? "" : '<tr><td colspan="3" class="hint">No hay ventas ese día.</td></tr>';
@@ -2979,28 +3145,20 @@ function renderAdmin() {
   pBody.innerHTML = "";
   STATE.profiles.forEach((p) => {
     const tr = document.createElement("tr");
-    const locOptions = ['<option value="">— (todas, solo propietario) —</option>']
-      .concat(STATE.locations.map((l) => `<option value="${esc(l.id)}"${p.location_id === l.id ? " selected" : ""}>${esc(l.name)}</option>`))
-      .join("");
+    const locOptions = opcionesAlcance(p.todas_tiendas ? TODAS : p.location_id || "");
     tr.innerHTML = `<td>${esc(p.full_name || "(sin nombre)")}</td>
-      <td><select data-field="role">
-        <option value="cajera"${p.role === "cajera" ? " selected" : ""}>cajera</option>
-        <option value="gerente"${p.role === "gerente" ? " selected" : ""}>gerente</option>
-        <option value="propietario"${p.role === "propietario" ? " selected" : ""}>propietario</option>
-      </select></td>
+      <td><select data-field="role">${Object.entries(ROL_NOMBRE).map(([k, v]) =>
+        `<option value="${k}"${p.role === k ? " selected" : ""}>${esc(v)}</option>`).join("")}</select></td>
       <td><select data-field="location_id">${locOptions}</select></td>
       <td><input type="checkbox" data-field="active"${p.active ? " checked" : ""}></td>
       <td>${rowActionsHtml()}</td>`;
     tr.querySelector(".btn-del").remove();
     tr.querySelector(".btn-save").addEventListener("click", async () => {
       const role = tr.querySelector('[data-field="role"]').value;
-      const locId = tr.querySelector('[data-field="location_id"]').value || null;
-      if (role !== "propietario" && !locId) {
-        alert("Una cajera o gerente necesita una sucursal asignada.");
-        return;
-      }
+      const a = alcancePerfil(role, tr.querySelector('[data-field="location_id"]').value);
+      if (a.error) { alert(a.error); return; }
       const { error } = await sb.from("profiles").update({
-        role, location_id: role === "propietario" ? null : locId,
+        role, location_id: a.location_id, todas_tiendas: a.todas_tiendas,
         active: tr.querySelector('[data-field="active"]').checked,
       }).eq("id", p.id);
       if (error) { alert(`No se pudo guardar: ${error.message}`); return; }
@@ -3010,15 +3168,27 @@ function renderAdmin() {
   });
 }
 
+// La tienda de cada persona: una tienda, "todas" (solo operaciones y
+// contabilidad de oficina, sql/20) o ninguna (solo la propietaria).
+const TODAS = "__todas__";
+function opcionesAlcance(sel) {
+  return [`<option value="">— Propietaria (todas) —</option>`, `<option value="${TODAS}"${sel === TODAS ? " selected" : ""}>Todas las tiendas (oficina)</option>`]
+    .concat(STATE.locations.map((l) => `<option value="${esc(l.id)}"${sel === l.id ? " selected" : ""}>${esc(l.name)}</option>`)).join("");
+}
+function alcancePerfil(rol, valor) {
+  if (rol === "propietario") return { location_id: null, todas_tiendas: false };
+  if (valor === TODAS) {
+    return ["operaciones", "contabilidad"].includes(rol) ? { location_id: null, todas_tiendas: true }
+      : { error: "Solo Operaciones y Contabilidad pueden ser de todas las tiendas. Una cajera o gerente necesita su sucursal." };
+  }
+  if (!valor) return { error: `${ROL_NOMBRE[rol] || rol} necesita una sucursal asignada (o "todas las tiendas" si es de oficina).` };
+  return { location_id: valor, todas_tiendas: false };
+}
+
 function fillNewUserLocationPicker() {
   const sel = $("nu-location");
   const keep = sel.value;
-  sel.innerHTML = '<option value="">— (todas: solo para propietario) —</option>';
-  STATE.locations.forEach((l) => {
-    const o = document.createElement("option");
-    o.value = l.id; o.textContent = l.name; sel.appendChild(o);
-  });
-  sel.value = keep || STATE.activeLocationId || "";
+  sel.innerHTML = opcionesAlcance(keep || STATE.activeLocationId || "");
 }
 
 // Crear la cuenta con el cliente normal metería a la persona recién creada en
@@ -3040,13 +3210,13 @@ $("btn-add-user").addEventListener("click", async () => {
   const correo = $("nu-email").value.trim().toLowerCase();
   const clave  = $("nu-password").value;
   const rol    = $("nu-role").value;
-  const locId  = $("nu-location").value || null;
+  const alcance = alcancePerfil(rol, $("nu-location").value);
 
   if (!nombre) { msg.textContent = "Ponle el nombre completo."; return; }
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(correo)) { msg.textContent = "Ese correo no se ve válido."; return; }
   if (clave.length < 6) { msg.textContent = "La contraseña temporal debe tener al menos 6 caracteres."; return; }
-  // La misma regla que impone la base: quien no es propietario necesita tienda.
-  if (rol !== "propietario" && !locId) { msg.textContent = "Una cajera o gerente necesita una sucursal asignada."; return; }
+  // La misma regla que impone la base: quien no es propietaria necesita tienda.
+  if (alcance.error) { msg.textContent = alcance.error; return; }
   if (!navigator.onLine) { msg.textContent = "Sin conexión: dar de alta a alguien necesita internet."; return; }
 
   const btn = $("btn-add-user");
@@ -3070,13 +3240,13 @@ $("btn-add-user").addEventListener("click", async () => {
     // tienda). Aquí el propietario le pone su rol y su sucursal de verdad.
     const { error: perr } = await sb.from("profiles").upsert({
       id: data.user.id, full_name: nombre, role: rol,
-      location_id: rol === "propietario" ? null : locId, active: true,
+      location_id: alcance.location_id, todas_tiendas: alcance.todas_tiendas, active: true,
     });
     if (perr) throw perr;
 
-    const tienda = STATE.locations.find((l) => l.id === locId);
-    msg.textContent = `Listo: ${nombre} ya puede entrar como ${rol}` +
-      (tienda ? ` en ${tienda.name}` : "") +
+    const tienda = STATE.locations.find((l) => l.id === alcance.location_id);
+    msg.textContent = `Listo: ${nombre} ya puede entrar como ${ROL_NOMBRE[rol] || rol}` +
+      (tienda ? ` en ${tienda.name}` : alcance.todas_tiendas ? " en todas las tiendas" : "") +
       `. Dale su correo y la contraseña temporal.` +
       (data.session ? "" : " Si al entrar le pide confirmar el correo, avísale a soporte técnico.");
     ["nu-name", "nu-email", "nu-password"].forEach((id) => ($(id).value = ""));
@@ -3430,7 +3600,7 @@ function dashRange() {
 }
 
 function dashScopeIds() {
-  if (!isOwner()) return [STATE.profile.location_id];
+  if (!veTodas()) return [STATE.profile.location_id];
   const v = $("dash-location").value;
   return v === "__all__" ? STATE.locations.filter((l) => l.active).map((l) => l.id) : [v];
 }
@@ -3449,7 +3619,7 @@ function fillDashLocationPicker() {
   const sel = $("dash-location");
   const keep = sel.value;
   sel.innerHTML = "";
-  if (isOwner()) {
+  if (veTodas()) {
     sel.innerHTML = '<option value="__all__">Todas las tiendas (consolidado)</option>';
     STATE.locations.forEach((l) => {
       const o = document.createElement("option");
@@ -3463,7 +3633,7 @@ function fillDashLocationPicker() {
     o.textContent = loc ? loc.name : "Mi tienda";
     sel.appendChild(o);
   }
-  sel.disabled = !isOwner();
+  sel.disabled = !veTodas();
 }
 
 $("dash-range").addEventListener("change", () => {
@@ -3924,162 +4094,7 @@ function renderDashToppings() {
    El saldo nunca se edita aquí: no hay un campo para eso. Para mover puntos
    a mano está el ajuste, que exige razón y queda con nombre en el libro.
    =========================================================================== */
-const CLI = { lista: [], sel: null, loaded: false };
-const MOV_LABELS = { gana: "Ganó", canje: "Canjeó", ajuste: "Ajuste", vence: "Venció" };
-
-// La dirección del carnet. Usa el mismo sitio en el que está abierta la caja,
-// así no hay que configurarla en ningún lado.
-function urlCarnet(codigo) {
-  // Sin ".html": el servidor redirige carnet.html → carnet, y cada salto es
-  // un toque más de espera en un teléfono con poca señal.
-  return `${location.origin}${location.pathname.replace(/[^/]*$/, "")}carnet?c=${encodeURIComponent(codigo)}`;
-}
-
-async function cargarClientes(texto) {
-  if (!canManage() || !navigator.onLine) return;
-  let q = sb.from("customers")
-            .select("id, card_code, full_name, phone, email, birth_date, points_balance, total_spent, visits, active, created_at")
-            .order("full_name").limit(200);
-  const t = (texto || "").trim();
-  if (t) {
-    const like = `%${t.replace(/[%,()]/g, "")}%`;
-    q = q.or(`full_name.ilike.${like},phone.ilike.${like},card_code.ilike.${like}`);
-  }
-  const { data, error } = await q;
-  if (error) { $("cli-count").textContent = `No se pudieron cargar: ${error.message}`; return; }
-  CLI.lista = data || [];
-  CLI.loaded = true;
-  pintarClientes();
-  pintarKpisFidelizacion();
-}
-
-function pintarClientes() {
-  const body = document.querySelector("#table-clientes tbody");
-  body.innerHTML = CLI.lista.length ? "" :
-    '<tr><td colspan="6" class="hint">Todavía no hay clientes inscritos. Se inscriben desde la pantalla de Venta.</td></tr>';
-  CLI.lista.forEach((c) => {
-    const tr = document.createElement("tr");
-    if (CLI.sel && CLI.sel.id === c.id) tr.classList.add("sel");
-    tr.innerHTML = `<td>${esc(c.full_name)}${c.active ? "" : ' <span class="hint">(inactivo)</span>'}</td>
-      <td>${esc(c.phone || "")}</td>
-      <td><code>${esc(c.card_code)}</code></td>
-      <td class="num"><strong>${esc(c.points_balance)}</strong></td>
-      <td class="num">${esc(c.visits)}</td>
-      <td class="num">${money(c.total_spent)}</td>`;
-    tr.addEventListener("click", () => abrirCliente(c.id));
-    body.appendChild(tr);
-  });
-  $("cli-count").textContent = CLI.lista.length ? `${CLI.lista.length} cliente(s)` : "";
-}
-
-function pintarKpisFidelizacion() {
-  const cfg = reglasFidelizacion();
-  const activos = CLI.lista.filter((c) => c.active);
-  const saldo = activos.reduce((a, c) => a + Number(c.points_balance || 0), 0);
-  const vp = cfg ? Number(cfg.valor_punto) : 0;
-  const kpi = (l, v, sub) => `<div class="kpi"><div class="kpi-label">${l}</div>
-    <div class="kpi-value num">${v}</div>${sub ? `<div class="kpi-sub">${sub}</div>` : ""}</div>`;
-  $("loy-kpis").innerHTML =
-    kpi("Clientes inscritos", activos.length) +
-    kpi("Puntos en circulación", saldo.toLocaleString("es")) +
-    // Esto es una deuda: lo que la marca tendría que regalar en descuentos si
-    // todos canjearan hoy. Conviene verlo crecer con calma.
-    kpi("Valor de esos puntos", money(saldo * vp), "lo que se descontaría si todos canjean hoy") +
-    kpi("Estado del programa", cfg ? (cfg.activo ? "Activo" : "Pausado") : "—",
-        cfg ? `1 punto por cada ${money(cfg.monto_por_punto)} · cada punto vale ${money(cfg.valor_punto)}` : "");
-}
-
-async function abrirCliente(id) {
-  const c = CLI.lista.find((x) => x.id === id);
-  if (!c) return;
-  CLI.sel = c;
-  pintarClientes();
-  const cfg = reglasFidelizacion();
-  $("cli-detail").hidden = false;
-  $("cli-d-name").textContent = c.full_name;
-  $("cli-d-meta").textContent = `Carnet ${c.card_code} · inscrito el ${new Date(c.created_at).toLocaleDateString()} · ${c.visits} visita(s)`;
-  $("cli-d-points").textContent = c.points_balance;
-  $("cli-d-value").textContent = cfg ? `puntos · valen ${money(c.points_balance * Number(cfg.valor_punto))}` : "puntos";
-  $("cli-e-name").value = c.full_name || "";
-  $("cli-e-phone").value = c.phone || "";
-  $("cli-e-email").value = c.email || "";
-  $("cli-e-birth").value = c.birth_date || "";
-  $("cli-e-active").checked = !!c.active;
-  $("cli-d-link").value = urlCarnet(c.card_code);
-  $("cli-e-msg").textContent = ""; $("cli-adj-msg").textContent = "";
-  $("cli-adj-pts").value = ""; $("cli-adj-note").value = "";
-
-  // Movimientos: la base solo devuelve los de las tiendas que este usuario
-  // puede ver. Para una gerente, los de su sucursal.
-  const { data } = await sb.from("loyalty_transactions")
-    .select("created_at, kind, points, amount, note, location_id, locations(name)")
-    .eq("customer_id", id).order("created_at", { ascending: false }).limit(100);
-  const body = document.querySelector("#table-cli-hist tbody");
-  const movs = data || [];
-  body.innerHTML = movs.length ? "" : '<tr><td colspan="6" class="hint">Sin movimientos visibles.</td></tr>';
-  movs.forEach((m) => {
-    const tr = document.createElement("tr");
-    const cls = m.points > 0 ? "pts-gana" : "pts-canje";
-    tr.innerHTML = `<td>${esc(new Date(m.created_at).toLocaleString())}</td>
-      <td>${esc((m.locations && m.locations.name) || "—")}</td>
-      <td>${esc(MOV_LABELS[m.kind] || m.kind)}</td>
-      <td class="num ${cls}">${m.points > 0 ? "+" : ""}${esc(m.points)}</td>
-      <td class="num">${m.amount != null ? money(m.amount) : ""}</td>
-      <td>${esc(m.note || "")}</td>`;
-    body.appendChild(tr);
-  });
-  $("cli-h-sub").textContent = isOwner()
-    ? "Todos los movimientos, de todas las tiendas."
-    : "Solo los movimientos de tu tienda. El saldo de arriba sí incluye lo de todas.";
-  $("cli-detail").scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
-$("btn-cli-buscar").addEventListener("click", () => cargarClientes($("cli-q").value));
-$("cli-q").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); cargarClientes($("cli-q").value); } });
-
-$("btn-cli-copiar").addEventListener("click", async () => {
-  const v = $("cli-d-link").value;
-  try { await navigator.clipboard.writeText(v); $("btn-cli-copiar").textContent = "¡Copiado!"; }
-  catch (e) { $("cli-d-link").select(); }
-  setTimeout(() => ($("btn-cli-copiar").textContent = "Copiar"), 1500);
-});
-
-$("btn-cli-guardar").addEventListener("click", async () => {
-  if (!CLI.sel) return;
-  const msg = $("cli-e-msg");
-  const nombre = $("cli-e-name").value.trim();
-  if (nombre.length < 2) { msg.textContent = "El nombre no puede quedar vacío."; return; }
-  // El saldo, el gasto y las visitas no van aquí: la base no deja tocarlos
-  // con un update directo, y la pantalla tampoco lo intenta.
-  const { error } = await sb.from("customers").update({
-    full_name: nombre,
-    phone: $("cli-e-phone").value.trim() || null,
-    email: $("cli-e-email").value.trim() || null,
-    birth_date: $("cli-e-birth").value || null,
-    active: $("cli-e-active").checked,
-  }).eq("id", CLI.sel.id);
-  if (error) { msg.textContent = `No se pudo guardar: ${error.message}`; return; }
-  msg.textContent = "Guardado.";
-  const id = CLI.sel.id;
-  await cargarClientes($("cli-q").value);
-  await abrirCliente(id);
-});
-
-$("btn-cli-ajustar").addEventListener("click", async () => {
-  if (!CLI.sel) return;
-  const msg = $("cli-adj-msg");
-  const pts = parseInt($("cli-adj-pts").value, 10);
-  const nota = $("cli-adj-note").value.trim();
-  if (!pts) { msg.textContent = "Escribe cuántos puntos (positivo para dar, negativo para quitar)."; return; }
-  if (!nota) { msg.textContent = "Escribe la razón: queda en el registro."; return; }
-  if (!confirm(`¿${pts > 0 ? "Dar" : "Quitar"} ${Math.abs(pts)} puntos a ${CLI.sel.full_name}?\n\nRazón: ${nota}`)) return;
-  const { error } = await sb.rpc("loyalty_ajustar", { p_customer_id: CLI.sel.id, p_puntos: pts, p_nota: nota });
-  if (error) { msg.textContent = error.message; return; }
-  const id = CLI.sel.id;
-  await cargarClientes($("cli-q").value);
-  await abrirCliente(id);
-  $("cli-adj-msg").textContent = "Ajuste aplicado.";
-});
+// La lista, la ficha y las cifras de cada cliente viven en clientes.js.
 
 /* --- Reglas (solo propietario) ------------------------------------------- */
 function explicarReglas() {
@@ -4166,7 +4181,7 @@ function gasRange() {
 }
 
 function gasScopeIds() {
-  if (!isOwner()) return [STATE.profile.location_id];
+  if (!veTodas()) return [STATE.profile.location_id];
   const v = $("gas-location").value;
   return v === "__all__" ? STATE.locations.filter((l) => l.active).map((l) => l.id) : [v];
 }
@@ -4185,7 +4200,7 @@ function gmoney(v) { return `${gasCurrency()} ${(Number(v) || 0).toFixed(2)}`; }
 function llenarSelectoresGastos() {
   const sel = $("gas-location"), keep = sel.value;
   sel.innerHTML = "";
-  if (isOwner()) {
+  if (veTodas()) {
     sel.innerHTML = '<option value="__all__">Todas las tiendas</option>';
     STATE.locations.forEach((l) => {
       const o = document.createElement("option"); o.value = l.id; o.textContent = l.name; sel.appendChild(o);
@@ -4197,7 +4212,7 @@ function llenarSelectoresGastos() {
     o.value = STATE.profile.location_id; o.textContent = loc ? loc.name : "Mi tienda";
     sel.appendChild(o);
   }
-  sel.disabled = !isOwner();
+  sel.disabled = !veTodas();
 
   const cats = Object.entries(EXPENSE_LABELS);
   const f = $("gas-cat-filter"), keepF = f.value;
@@ -4402,7 +4417,7 @@ function cmoney(v) {
 
 function prepararCompras() {
   const opciones = (conCentral, conTodas) => {
-    if (!isOwner()) {
+    if (!veTodas()) {
       const loc = activeLocation();
       return `<option value="${esc(STATE.profile.location_id)}">${esc(loc ? loc.name : "Mi tienda")}</option>`;
     }
@@ -4414,7 +4429,7 @@ function prepararCompras() {
     const sel = $(id), keep = sel.value;
     sel.innerHTML = opciones(true, id === "cmp-location");
     if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
-    sel.disabled = !isOwner();
+    sel.disabled = !veTodas();
   });
   if (!$("cmp-from").value) {
     const hoy = new Date();

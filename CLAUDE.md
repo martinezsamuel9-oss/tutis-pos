@@ -74,6 +74,9 @@ sql/17_app_clientes.sql     app de clientes: carnet ligado al usuario, menú pú
 sql/18_tiendas_mapa.sql     ubicación, horario por día, teléfono y minutos de cada tienda para la app;
                             el pedido de la app se rechaza fuera del horario
 sql/19_caja.sql             turnos de caja (una caja por tienda, varias cajeras), retiros/entradas y arqueo ciego
+sql/20_roles.sql            roles Operaciones y Contabilidad (de una tienda o de todas) y quién cobra
+sql/21_cierre_formas_pago.sql cierre como ICG: pre-cierre del datáfono, lote, y declarar cada forma de pago
+sql/22_clientes.sql         clientes: el teléfono es la llave, ficha completa, categorías, cifras y cumpleaños
 app-ios/           app nativa de iPhone (SwiftUI) para clientes: pedir, puntos, regalos (ver 3.9)
 sql/13_privilegios.sql      quita TRUNCATE, TRIGGER, REFERENCES y MAINTAIN (PG17) a anon y authenticated,
                             también para las tablas futuras (TRUNCATE se salta RLS)
@@ -84,12 +87,14 @@ sql/pruebas/        prueba_aislamiento.sql (13) + prueba_seguridad.sql (48 ataqu
                     + prueba_fidelizacion.sql (19) + prueba_pesos.sql (48)
                     + prueba_huella.sql (12) + prueba_compras.sql (28)
                     + prueba_productos.sql (14) + prueba_tarjeta.sql (7) + prueba_app.sql (32) + prueba_mapa.sql (32) + prueba_caja.sql (38)
+                    + prueba_cierre.sql (35) + prueba_clientes.sql (43)
                     + borrar_datos_de_prueba.sql (quita las demostraciones)
                     + datos_de_demostracion.sql (14 días de ventas, borrables)
 web/index.html      estructura y pestañas (sin scripts en línea: hay CSP)
 web/app.js          toda la lógica (17 secciones numeradas)
 web/bascula.js      protocolo de la báscula (CAS PD-II en NCI); se prueba en Node
 web/libro-ventas.js libro de ventas en el formato ICG (Excel .xlsx hecho a mano); se prueba en Node
+web/clientes.js     módulo de clientes y "¿Es cliente?" al cobrar (se carga después de app.js)
 caja/               modo kiosko de Chrome + cómo configurar la báscula (ver su LEEME.md)
 pruebas-web/        pruebas de la pantalla de venta con Playwright y báscula simulada
 web/styles.css      estilos, modo día/noche
@@ -158,6 +163,22 @@ Cada una resuelve un problema concreto; revertirlas rompe algo:
 | `cajera` | solo su sucursal | cobrar (vía RPC), ver catálogo, inscribir y buscar clientes, canjear puntos |
 | `gerente` | solo su sucursal | todo lo anterior + dashboard, gastos, clientes y ajustes de puntos, inventario, toppings, precios, reportes, configuración de SU tienda |
 | `propietario` | todas | todo + crear sucursales + asignar roles y tiendas + reglas del programa de puntos |
+| `operaciones` | una tienda o todas | inventario diario, fabricación, compras. No cobra, no abre la caja, no ve clientes ni cambia precios |
+| `contabilidad` | una tienda o todas | tablero, reportes, turnos de caja (solo verlos), gastos, compras, libro contable. No cobra ni toca inventario |
+
+Pantalla: la gerente se llama "Gerencia" (es el rol `gerente`). Operaciones y
+contabilidad pueden ser de la oficina: `profiles.todas_tiendas` (sql/20), que
+la base solo acepta para esos dos roles y que solo pone la propietaria.
+Lo que no hay que deshacer:
+
+1. **Solo cajera, gerente y propietaria registran ventas** (disparador
+   `trg_ventas_solo_caja`) y operan la caja (`caja_quien`). process_sale solo
+   comparaba la tienda del perfil.
+2. **Los clientes los ven solo cajera, gerente y propietaria**
+   (`es_personal_de_caja()`): son datos personales.
+3. **`can_operate_location` / `can_account_location`** son los permisos de
+   operaciones y de contabilidad; `location_id` null = la oficina, que solo
+   ve la propietaria o quien tiene `todas_tiendas`.
 
 `profiles.location_id` es NULL solo para el propietario. Un usuario sin
 sucursal asignada (y que no sea propietario) no puede entrar — es intencional,
@@ -557,6 +578,55 @@ tienda, 2 cajeras o más. Tarjeta *Caja* arriba de la báscula en Venta, y
 6. Denominaciones por moneda en `DENOMINACIONES` (app.js). El servidor suma
    el conteo (`caja_suma_conteo`) y rechaza denominaciones o cantidades raras.
 
+## 3.11 Cierre de caja como ICG (sql/21)
+
+Pedido del negocio (2026-10-30), con el video del cierre de FrontRetail como
+modelo. El cierre va en pasos: **1. Tarjeta** (pre-cierre: la lista de
+vouchers que la caja registró; luego el cierre del datáfono y se anota el
+lote, cuántas ventas y el monto), **2. Efectivo** (conteo ciego de toda la
+gaveta; después se ve el fondo que queda y lo retirado), **3. Otras formas**
+(transferencia, Pedidos Ya, Hugo). Al aceptar sale el faltante o sobrante
+por forma de pago y el total. Lo que no hay que deshacer:
+
+1. **Con ventas con tarjeta no se cierra sin el lote** del datáfono. Lo
+   declarado de tarjeta ES el monto del lote; si no coincide con la caja, o
+   no coincide el número de ventas, sale en rojo.
+2. **El conteo sigue siendo ciego**: el sistema no muestra lo esperado de
+   ninguna forma de pago hasta que se guarda.
+3. `caja_cuentas` agrupa por forma de pago (`por_pago`) y conserva las llaves
+   viejas (ventas_efectivo, tarjeta…) para los reportes que ya las leían.
+4. Las formas de pago son efectivo, tarjeta, transferencia, pedidosya y
+   hugo. process_sale NO las valida (una venta sin conexión no se rechaza).
+
+## 3.12 Clientes (sql/22 + web/clientes.js)
+
+Pedido del negocio (2026-10-30): ficha con nombre, cumpleaños, sexo, número
+de identidad y observaciones; **la llave del cliente es su teléfono**; al
+cobrar, la caja pregunta si es cliente; módulo con cada cuánto viene, ticket
+promedio, resumen de consumo, quién no viene desde una fecha, aviso de
+cumpleaños y categorías (VIP, frecuente, nuevo, ocasional, inactivo). Lo que
+no hay que deshacer:
+
+1. **El teléfono es la llave de negocio, no la llave primaria.** `telefono_clave`
+   (columna generada: solo dígitos, sin el 504) es único entre los activos y
+   obligatorio para los nuevos (check NOT VALID: los viejos no se revisan).
+   Por dentro sigue el uuid: si cambia de número, conserva historial, puntos
+   y carnet. Con el teléfono como llave primaria, cambiar de número la
+   dejaría sin nada.
+2. **Las cifras son de las tiendas que quien mira puede ver**
+   (`clientes_tiendas`); **la categoría es de toda la marca**, como los
+   puntos. Una etiqueta no revela montos de la otra tienda.
+3. **La identidad no llega a la caja**: `loyalty_buscar` no la devuelve; la
+   ve la gerente en el módulo. Operaciones y contabilidad no ven clientes.
+4. **Las reglas de las categorías viven en `clientes_config`** (solo la
+   propietaria las cambia) y la pantalla las dice.
+5. **"¿Es cliente?" solo con internet**, una vez por venta, y se puede
+   apagar (`clientes_config.preguntar_en_caja`). Si tiene puntos para
+   canjear, pregunta si los usa y vuelve al ticket; si no, sigue cobrando.
+   Sin internet se cobra directo: la venta no espera a la red.
+6. `loyalty_registrar` sigue existiendo (pantallas en caché) pero pasa por
+   `clientes_inscribir`, con las mismas reglas.
+
 ## 4. Restricciones permanentes (pedidas explícitamente)
 
 - **NUNCA incluir el sitio web `https://tutis.innova504.com/` en la factura o
@@ -721,6 +791,9 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/16_tarjeta.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/17_app_clientes.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/18_tiendas_mapa.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/19_caja.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/20_roles.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/21_cierre_formas_pago.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/22_clientes.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_aislamiento.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_seguridad.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_fidelizacion.sql
@@ -732,6 +805,8 @@ psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_tarjeta.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_app.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_mapa.sql
 psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_caja.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_cierre.sql
+psql -h /tmp/pg -p 5433 -U postgres -f sql/pruebas/prueba_clientes.sql
 ```
 
 `00_simulacion_supabase.sql` recrea lo que Supabase ya trae (schema `auth`,
@@ -751,7 +826,7 @@ un doble en memoria y simulan la báscula CAS por Web Serial. Manejan la caja de
 punta a punta: pesar, línea fija, anular, recargar, PIN, sin internet, reporte
 (cómo correrlas: su LEEME.md). Lo esencial que debe seguir cumpliéndose:
 
-- Una cajera ve solo la pestaña Venta; el propietario ve las 6.
+- Una cajera ve solo Venta y Pedidos app; la propietaria ve todas.
 - 150g helado + 30g topping + vaso de 15g a 0.45/g = **HNL 87.75**.
 - Al cobrar sin conexión: el recibo igual se muestra, avisa que quedó
   pendiente, y la venta queda en `localStorage` bajo `tutis_pending_sales`.

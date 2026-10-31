@@ -30,7 +30,7 @@ insert into auth.users (id, email, raw_app_meta_data) values
 
 select set_config('t.g', (select id::text from locations where name='Tuti''s Galerías'), false),
        set_config('t.m', (select id::text from locations where name='Tuti''s Multiplaza'), false);
-insert into public.customers (card_code, full_name, phone) values ('PRUEBAAPP2', '[prueba app] Clienta de caja', '50499887766');
+insert into public.customers (card_code, full_name, phone) values ('PRUEBAAPP2', '[prueba app] Clienta de caja', '50499776655');
 insert into public.products (location_id, family, name, price, cost) values
   (current_setting('t.g')::uuid, 'Bebidas', '[prueba app] Agua', 25, 8) on conflict (location_id, family, name) do nothing;
 select set_config('t.agua', (select id::text from public.products where name = '[prueba app] Agua'), false);
@@ -78,11 +78,11 @@ select pg_temp.ok(jsonb_array_length(public.app_menu()->'tamanos') = 3 and (publ
 reset role; set role authenticated;
 select pg_temp.como('77777777-7777-7777-7777-777777777777');
 select pg_temp.ok(public.app_mi_carnet() is null, 'B2 un cliente nuevo aún no tiene carnet');
-select pg_temp.falla($$select public.app_registrarme('[prueba app] Andrea', '9988-7766')$$, 'ya tiene carnet', 'B3 un teléfono que ya tiene carnet no se duplica');
+select pg_temp.falla($$select public.app_registrarme('[prueba app] Andrea', '9977-6655')$$, 'ya tiene carnet', 'B3 un teléfono que ya tiene carnet no se duplica');
 select pg_temp.falla($$select public.app_vincular_carnet('PRUEBAAPP2', '3333-4444')$$, 'no coinciden', 'B4 vincular con el teléfono equivocado no se queda con los puntos de nadie');
-select pg_temp.ok((public.app_vincular_carnet('pruebaapp2', '+504 9988-7766')->>'codigo') = 'PRUEBAAPP2', 'B5 con código y teléfono correctos se vincula su carnet de la caja');
+select pg_temp.ok((public.app_vincular_carnet('pruebaapp2', '+504 9977-6655')->>'codigo') = 'PRUEBAAPP2', 'B5 con código y teléfono correctos se vincula su carnet de la caja');
 select pg_temp.como('88888888-8888-8888-8888-888888888888');
-select pg_temp.falla($$select public.app_vincular_carnet('PRUEBAAPP2', '99887766')$$, 'no coinciden', 'B6 un carnet ya vinculado no lo toma otra persona');
+select pg_temp.falla($$select public.app_vincular_carnet('PRUEBAAPP2', '99776655')$$, 'no coinciden', 'B6 un carnet ya vinculado no lo toma otra persona');
 select pg_temp.ok((public.app_registrarme('[prueba app] Otra', '3311-2233')->>'puntos')::int = 0, 'B7 un cliente nuevo crea su carnet desde la app');
 
 -- ------------------------------------------------------------ pedidos

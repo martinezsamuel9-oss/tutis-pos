@@ -264,7 +264,7 @@ function tablaVouchers(c, moneda) {
   </table>`;
 }
 
-const PAGOS = { efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia", sin_dato: "Sin dato (ventas antiguas)" };
+const PAGOS = { efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia", pedidosya: "Pedidos Ya", hugo: "Hugo", sin_dato: "Sin dato (ventas antiguas)" };
 
 function bloqueTienda(c) {
   const u = c.weight_unit === "oz" ? "oz" : "g";

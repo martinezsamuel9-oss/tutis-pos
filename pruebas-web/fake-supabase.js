@@ -13,7 +13,12 @@
       { id: "S2", location_id: "L1", name: "Cuchara", kind: "cuchara", tare_weight_g: 0, cost_per_unit: 0.38, stock_qty: 900, active: true },
     ],
     profiles: [{ id: "U1", role: rol, location_id: rol === "propietario" ? null : "L1", active: true, full_name: rol === "cajera" ? "Cajera Uno" : "Gerente Uno" }],
-    sales: JSON.parse(localStorage.getItem("fake_sales") || "[]"), loyalty_config: [], expenses: [], audit_log: [], customers: [], loyalty_transactions: [], sale_lines: [], purchases: [], products: JSON.parse(localStorage.getItem("fake_products") || "[]"),
+    sales: JSON.parse(localStorage.getItem("fake_sales") || "[]"),
+    loyalty_config: localStorage.getItem("fake_loyalty") === "1"
+      ? [{ id: true, activo: true, monto_por_punto: 27, valor_punto: 1, compra_minima: 0, canje_minimo: 50, canje_max_pct: 50 }] : [],
+    // La pregunta "¿Es cliente?" se prende solo en las pruebas que la revisan.
+    clientes_config: [{ id: true, vip_monto_90d: 1500, vip_visitas_90d: 8, frecuente_visitas_90d: 3, nuevo_dias: 30,
+      inactivo_dias: 45, aviso_cumple_dias: 7, preguntar_en_caja: localStorage.getItem("fake_preguntar") === "1" }], expenses: [], audit_log: [], customers: [], loyalty_transactions: [], sale_lines: [], purchases: [], products: JSON.parse(localStorage.getItem("fake_products") || "[]"),
   };
   const log = JSON.parse(localStorage.getItem("fake_rpcs") || "[]");
   function anotar(name, args) { log.push({ name, args }); localStorage.setItem("fake_rpcs", JSON.stringify(log)); }
@@ -83,19 +88,68 @@
       }
       case "caja_movimiento": return { data: { abierta: true, turno: { id: "T1", abierto_por: "Cajera Uno", abierto_at: new Date().toISOString(), es_mio: true,
                                         movimientos: [{ tipo: args.p_tipo, monto: args.p_monto, motivo: args.p_motivo }] } }, error: null };
+      // Pre-cierre: dos vouchers del turno (uno sin autorización).
+      case "caja_precierre": return { data: { desde: new Date().toISOString(), ventas: 2, monto: 300, sin_autorizacion: 1, vouchers: [
+          { folio: 31, hora: new Date().toISOString(), monto: 200, autorizacion: "000123", ultimos4: "2640", cajera: "Cajera Uno", repetida: false },
+          { folio: 32, hora: new Date().toISOString(), monto: 100, autorizacion: null, ultimos4: null, cajera: "<b>Cajera</b>", repetida: false }] }, error: null };
+      // El sistema "tiene": efectivo 1000 esperado, tarjeta 300 (2), Pedidos Ya 150 (1).
       case "caja_cerrar": {
+        if (!args.p_lote) return { data: null, error: { message: "Hubo ventas con tarjeta: primero haz el cierre del datáfono y anota el lote" } };
         localStorage.setItem("fake_caja", "cerrada");
         const contado = Object.entries(args.p_conteo).reduce((s, [v, n]) => s + Number(v) * n, 0);
+        const dec = args.p_declarado || {};
+        const sis = { efectivo: 1000, tarjeta: 300, transferencia: 0, pedidosya: 150, hugo: 0 };
+        const formas = Object.keys(sis).map((k) => {
+          const d = k === "efectivo" ? contado : Number(dec[k] || 0);
+          return { metodo: k, sistema: sis[k], declarado: d, diferencia: Math.round((d - sis[k]) * 100) / 100, n: sis[k] ? 1 : 0 };
+        });
+        const tot = (f) => formas.reduce((s, x) => s + x[f], 0);
         return { data: { id: "T1", fondo: 700, ventas_efectivo: 400, n_efectivo: 4, entradas: 0, retiros: 100, esperado: 1000, contado,
                          diferencia: contado - 1000, deja_fondo: args.p_deja_fondo, tarjeta: 300, n_tarjeta: 2, transferencia: 0, n_transferencia: 0,
+                         formas, total_sistema: tot("sistema"), total_declarado: tot("declarado"), diferencia_total: Math.round((tot("declarado") - tot("sistema")) * 100) / 100,
+                         lote: args.p_lote, lote_diferencia: args.p_lote.monto - 300, lote_ventas_diferencia: args.p_lote.ventas - 2,
                          abierto_por: "Cajera Uno", abierto_at: new Date().toISOString(), cerrado_por: "Cajera Uno", cerrado_at: new Date().toISOString() }, error: null };
       }
       case "caja_explicar": case "caja_revisar": return { data: null, error: null };
       case "caja_turnos": return { data: { turnos: [
           { id: "T9", abierto_por: "<b>Ana</b>", abierto_at: "2026-10-27T14:00:00Z", cerrado_por: "Bea", cerrado_at: "2026-10-27T20:00:00Z",
             fondo: 650, fondo_anterior: 700, diferencia_entrega: -50, contado: 980, esperado_al_cerrar: 1000, esperado: 1040, diferencia: -20,
-            explicacion: "Di mal un vuelto", ventas_efectivo: 400, n_efectivo: 4, entradas: 0, retiros: 100, movimientos: [] }],
+            explicacion: "Di mal un vuelto", ventas_efectivo: 400, n_efectivo: 4, entradas: 0, retiros: 100, movimientos: [],
+            por_pago: { efectivo: { n: 4, total: 400 }, pedidosya: { n: 1, total: 150 } },
+            formas: [{ metodo: "efectivo", sistema: 1000, declarado: 980, diferencia: -20 }, { metodo: "pedidosya", sistema: 150, declarado: 140, diferencia: -10 }],
+            diferencia_total: -30, lote_tarjeta: { lote: "000389", ventas: 0, monto: 0 } }],
           fuera_de_turno: { ventas: 1, total: 25, folios: [27] } }, error: null };
+      case "loyalty_buscar": {
+        const d = String(args.p_texto).replace(/\D/g, "");
+        return { data: d.endsWith("99110001") ? [{ id: "C1", card_code: "VALE234567", full_name: "Valeria <i>R</i>", phone: "99110001",
+          points_balance: 120, visits: 9, active: true, observaciones: "Sin lactosa", dias_para_cumple: 0, categoria: "vip", exacto: true }] : [], error: null };
+      }
+      case "clientes_inscribir": {
+        const p = args.p || {};
+        if (String(p.telefono || "").replace(/\D/g, "") === "99110001") return { data: null, error: { message: "Ya hay un cliente con ese teléfono" } };
+        return { data: { id: "C2", card_code: "NUEVO23456", full_name: p.nombre, phone: String(p.telefono).replace(/\D/g, ""),
+          points_balance: 0, visits: 0, active: true, categoria: "sin_compras", observaciones: p.observaciones || null }, error: null };
+      }
+      case "loyalty_canje_maximo": return { data: { puntos: 60, descuento: 60 }, error: null };
+      case "clientes_resumen": return { data: [
+        { id: "C1", nombre: "Valeria <i>R</i>", telefono: "99110001", carnet: "VALE234567", cumpleanos: "1999-10-30", dias_para_cumple: 0,
+          sexo: "F", identidad: "0801-1999-00001", observaciones: "Sin lactosa", puntos: 120, activo: true, inscrito: "2026-01-02T15:00:00Z",
+          categoria: "vip", visitas: 12, total: 1800, ticket_promedio: 150, primera: "2026-01-02T15:00:00Z", ultima: new Date(Date.now() - 2 * 864e5).toISOString(),
+          dias_sin_venir: 2, cada_cuantos_dias: 25.1, visitas_90: 5, monto_90: 900 },
+        { id: "C3", nombre: "Óscar Pérez", telefono: "99110003", carnet: "OSCA234567", cumpleanos: null, dias_para_cumple: null,
+          sexo: "M", identidad: null, observaciones: null, puntos: 10, activo: true, inscrito: "2026-03-02T15:00:00Z",
+          categoria: "inactivo", visitas: 2, total: 200, ticket_promedio: 100, primera: "2026-03-02T15:00:00Z", ultima: "2026-06-01T15:00:00Z",
+          dias_sin_venir: 151, cada_cuantos_dias: 91, visitas_90: 0, monto_90: 0 },
+        { id: "C4", nombre: "Nadia Sin Compras", telefono: "99110004", carnet: "NADI234567", cumpleanos: null, dias_para_cumple: null,
+          sexo: null, identidad: null, observaciones: null, puntos: 0, activo: true, inscrito: "2026-10-20T15:00:00Z",
+          categoria: "sin_compras", visitas: 0, total: 0, ticket_promedio: 0, primera: null, ultima: null,
+          dias_sin_venir: null, cada_cuantos_dias: null, visitas_90: 0, monto_90: 0 }], error: null };
+      case "clientes_cumpleanos": return { data: [{ id: "C1", nombre: "Valeria <i>R</i>", telefono: "99110001", cumpleanos: "1999-10-30", dias: 0, cumple: 27, categoria: "vip" }], error: null };
+      case "cliente_detalle": return { data: { categoria: "vip",
+        ultimas: [{ fecha: "2026-10-28T20:00:00Z", folio: 41, tienda: "Tuti's Galerías", total: 150, pago: "tarjeta", puntos_canjeados: 0 }],
+        consumo: [{ tipo: "producto", nombre: "Shake <b>Mora</b>", veces: 7, unidades: 7, peso_g: 0, monto: 840 },
+                  { tipo: "helado", nombre: "Yogurt natural", veces: 5, unidades: 5, peso_g: 1500, monto: 600 }],
+        por_dia: { "6": 7, "2": 1 }, por_hora: { "16": 6, "11": 2 }, pagos: { tarjeta: 9, efectivo: 3 } }, error: null };
       default: return { data: null, error: { message: "no simulado: " + name, code: "X" } };
     }
   }

@@ -103,7 +103,8 @@ select pg_temp.como('c0000000-0000-0000-0000-000000000001');
 select pg_temp.falla($$select public.caja_cerrar(current_setting('t.g')::uuid, '{"100": 7}', 800)$$, 'más de lo que contaste', 'K20 no se deja de fondo más de lo contado');
 select pg_temp.falla($$select public.caja_cerrar(current_setting('t.g')::uuid, '{"100": 7}', null)$$, 'fondo', 'K21 hay que decir cuánto queda de fondo');
 select set_config('t.cierre', public.caja_cerrar(current_setting('t.g')::uuid,
-  '{"500": 1, "100": 2, "50": 1, "20": 1, "10": 1, "0.25": 1}', 700)::text, false);
+  '{"500": 1, "100": 2, "50": 1, "20": 1, "10": 1, "0.25": 1}', 700,
+  '{"tarjeta": 300, "transferencia": 80}', '{"lote": "000389", "ventas": 1, "monto": 300}')::text, false);
 select pg_temp.ok((current_setting('t.cierre')::jsonb->>'esperado')::numeric = 800.25
                   and (current_setting('t.cierre')::jsonb->>'contado')::numeric = 780.25
                   and (current_setting('t.cierre')::jsonb->>'diferencia')::numeric = -20,
